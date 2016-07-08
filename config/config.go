@@ -22,6 +22,15 @@ type LogConfig struct {
 	DisableHTTP bool `envconfig:"default=false"`
 }
 
+// configures limits for web/SyncUserHandler
+type UserHandlerConfig struct {
+	MaxBSOGetLimit  int `envconfig:"default=0"`
+	MaxPOSTRecords  int `envconfig:"default=0"`
+	MaxPOSTBytes    int `envconfig:"default=0"`
+	MaxTotalRecords int `envconfig:"default=0"`
+	MaxTotalBytes   int `envconfig:"default=0"`
+}
+
 type PoolConfig struct {
 	Num     int `envconfig:"default=0"`
 	MaxSize int `envconfig:"default=25"`
@@ -38,6 +47,10 @@ var Config struct {
 
 	// Enable the pprof web endpoint /debug/pprof/
 	EnablePprof bool `envconfig:"default=false"`
+
+	// SyncUserHandler limits / configuration
+	// available as LIMIT_x
+	Limit *UserHandlerConfig
 }
 
 // so we can use config.Port and not config.Config.Port
@@ -50,6 +63,8 @@ var (
 	Secrets     []string
 	Pool        *PoolConfig
 	EnablePprof bool
+
+	Limit *UserHandlerConfig
 
 	DisableHTTPLogs bool
 )
@@ -101,6 +116,22 @@ func init() {
 		Config.Pool.Num = runtime.NumCPU()
 	}
 
+	if Config.Limit.MaxBSOGetLimit < 0 {
+		log.Fatal("LIMIT_MAX_BSO_GET_LIMIT must be >= 0")
+	}
+	if Config.Limit.MaxPOSTRecords < 0 {
+		log.Fatal("LIMIT_MAX_POST_RECORDS must be >= 0")
+	}
+	if Config.Limit.MaxPOSTBytes < 0 {
+		log.Fatal("LIMIT_MAX_MAX_POST_BYTES must be >= 0")
+	}
+	if Config.Limit.MaxTotalRecords < 0 {
+		log.Fatal("LIMIT_MAX_TOTAL_RECORDS must be >= 0")
+	}
+	if Config.Limit.MaxTotalBytes < 0 {
+		log.Fatal("LIMIT_MAX_TOTAL_BYTES must be >= 0")
+	}
+
 	Hostname = Config.Hostname
 	Log = Config.Log
 	Host = Config.Host
@@ -109,4 +140,5 @@ func init() {
 	DataDir = Config.DataDir
 	Pool = Config.Pool
 	EnablePprof = Config.EnablePprof
+	Limit = Config.Limit
 }

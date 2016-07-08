@@ -1,7 +1,7 @@
 package web
 
 import (
-	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -18,12 +18,29 @@ import (
 	"github.com/mozilla-services/go-syncstorage/syncstorage"
 )
 
-const (
-	BATCH_MAX_IDS = 100
+type SyncUserHandlerConfig struct {
+	// Over rides
+	MaxBSOGetLimit int
 
-	// maximum number of BSOs per GET request
-	MAX_BSO_GET_LIMIT = 2500
-)
+	// API Limits
+	MaxPOSTRecords  int
+	MaxPOSTBytes    int
+	MaxTotalRecords int
+	MaxTotalBytes   int
+}
+
+func NewDefaultSyncUserHandlerConfig() *SyncUserHandlerConfig {
+	return &SyncUserHandlerConfig{
+		// Over rides
+		MaxBSOGetLimit: 2500,
+
+		// API Limits
+		MaxPOSTRecords:  100,
+		MaxPOSTBytes:    2 * 1024 * 1024,
+		MaxTotalRecords: 1000,
+		MaxTotalBytes:   20 * 1024 * 1024,
+	}
+}
 
 // SyncUserHandler provides all the sync 1.5 API routes for a single user.
 // It implements http.Handler. It's design is kept simple on purpose
@@ -43,19 +60,23 @@ type SyncUserHandler struct {
 	// need to be synchronized
 	lastChange time.Time
 
-	// Over rides
-	MaxBSOGetLimit int
+	config *SyncUserHandlerConfig
 }
 
-func NewSyncUserHandler(uid string, db *syncstorage.DB) *SyncUserHandler {
+func NewSyncUserHandler(uid string, db *syncstorage.DB, config *SyncUserHandlerConfig) *SyncUserHandler {
 
 	// https://docs.services.mozilla.com/storage/apis-1.5.html
 	r := mux.NewRouter()
+
+	if config == nil {
+		config = NewDefaultSyncUserHandlerConfig()
+	}
 
 	server := &SyncUserHandler{
 		uid:    uid,
 		router: r,
 		db:     db,
+		config: config,
 	}
 
 	// top level deletions for the user and their storage
@@ -69,6 +90,7 @@ func NewSyncUserHandler(uid string, db *syncstorage.DB) *SyncUserHandler {
 	info.HandleFunc("/collections", server.hInfoCollections).Methods("GET")
 	info.HandleFunc("/collection_usage", server.hInfoCollectionUsage).Methods("GET")
 	info.HandleFunc("/collection_counts", server.hInfoCollectionCounts).Methods("GET")
+	info.HandleFunc("/configuration", server.hInfoConfiguration).Methods("GET")
 	info.HandleFunc("/quota", server.hInfoQuota).Methods("GET")
 
 	storage := v.PathPrefix("/storage/").Subrouter()
@@ -289,6 +311,16 @@ func (s *SyncUserHandler) hInfoCollectionCounts(w http.ResponseWriter, r *http.R
 	JsonNewline(w, r, results)
 }
 
+func (s *SyncUserHandler) hInfoConfiguration(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprintf(w, `{"max_post_records":%d,"max_post_bytes":%d,"max_total_records":%d,"max_total_bytes":%d}`,
+		s.config.MaxPOSTRecords,
+		s.config.MaxPOSTBytes,
+		s.config.MaxTotalRecords,
+		s.config.MaxTotalBytes,
+	)
+}
+
 func (s *SyncUserHandler) hCollectionGET(w http.ResponseWriter, r *http.Request) {
 
 	if !AcceptHeaderOk(w, r) {
@@ -327,7 +359,7 @@ func (s *SyncUserHandler) hCollectionGET(w http.ResponseWriter, r *http.Request)
 	if v := r.Form.Get("ids"); v != "" {
 		ids = strings.Split(v, ",")
 
-		if len(ids) > BATCH_MAX_IDS {
+		if len(ids) > s.config.MaxPOSTRecords {
 			JSONError(w, "exceeded max batch size", http.StatusBadRequest)
 			return
 		}
@@ -377,23 +409,8 @@ func (s *SyncUserHandler) hCollectionGET(w http.ResponseWriter, r *http.Request)
 	}
 
 	// assign a default value for limit if nothing is supplied
-	if limit == 0 {
-		if s.MaxBSOGetLimit > 0 { // only use this if it was set
-			limit = s.MaxBSOGetLimit
-		} else {
-			limit = MAX_BSO_GET_LIMIT
-		}
-	}
-
-	// make sure limit is smaller than s.MaxBSOGetLimit if it is set
-	if limit > s.MaxBSOGetLimit && s.MaxBSOGetLimit > 0 {
-		limit = s.MaxBSOGetLimit
-	}
-
-	// finally a global max that we never want to go over
-	// TODO is this value ok for prod?
-	if limit > MAX_BSO_GET_LIMIT {
-		limit = MAX_BSO_GET_LIMIT
+	if limit <= 0 || limit > s.config.MaxBSOGetLimit {
+		limit = s.config.MaxBSOGetLimit
 	}
 
 	if v := r.Form.Get("offset"); v != "" {
@@ -455,58 +472,34 @@ func (s *SyncUserHandler) hCollectionGET(w http.ResponseWriter, r *http.Request)
 func (s *SyncUserHandler) hCollectionPOST(w http.ResponseWriter, r *http.Request) {
 	// accept text/plain from old (broken) clients
 	ct := r.Header.Get("Content-Type")
-
 	if ct != "application/json" && ct != "text/plain" && ct != "application/newlines" {
 		JSONError(w, "Not acceptable Content-Type", http.StatusUnsupportedMediaType)
 		return
 	}
 
-	// a list of all the raw json encoded BSOs
-	var raw []json.RawMessage
+	batchFound, batchId, batchCommit := GetBatchIdAndCommit(r)
+	if batchCommit && !batchFound {
+		JSONError(w, "Batch ID required", http.StatusBadRequest)
+		return
+	} else if batchId != "" || (batchId == "true" && batchCommit == false) {
+		s.hCollectionPOSTBatch(w, r)
+	} else {
+		s.hCollectionPOSTClassic(w, r)
+	}
+}
 
-	if ct == "application/json" || ct == "text/plain" {
-		decoder := json.NewDecoder(r.Body)
-		err := decoder.Decode(&raw)
-		if err != nil {
-			WeaveInvalidWBOError(w, r)
-			return
-		}
-	} else { // deal with application/newlines
-		raw = []json.RawMessage{}
-		scanner := bufio.NewScanner(r.Body)
-		for scanner.Scan() {
-			bsoBytes := scanner.Bytes()
-			raw = append(raw, bsoBytes)
-		}
+// hCollectionPOSTClassic is the historical POST handling logic prior to
+// the addition of atomic commits from multiple POST requests
+func (s *SyncUserHandler) hCollectionPOSTClassic(w http.ResponseWriter, r *http.Request) {
+
+	bsoToBeProcessed, results, err := RequestToPostBSOInput(r)
+	if err != nil {
+		WeaveInvalidWBOError(w, r)
+		return
 	}
 
-	// bsoToBeProcessed will actually get sent to the DB
-	bsoToBeProcessed := syncstorage.PostBSOInput{}
-	results := syncstorage.NewPostResults(syncstorage.Now())
-
-	for _, rawJSON := range raw {
-		var b syncstorage.PutBSOInput
-		if err := parseIntoBSO(rawJSON, &b); err == nil {
-			bsoToBeProcessed = append(bsoToBeProcessed, &b)
-		} else {
-			// ignore empty whitespace lines from application/newlines
-			if len(strings.TrimSpace(string(rawJSON))) == 0 {
-				continue
-			}
-
-			// couldn't parse a BSO into something real
-			// abort immediately
-			if err.field == "-" { // json error, not an object
-				WeaveInvalidWBOError(w, r)
-				return
-			}
-
-			results.AddFailure(err.bId, fmt.Sprintf("invalid %s", err.field))
-		}
-	}
-
-	if len(bsoToBeProcessed) > BATCH_MAX_IDS {
-		JSONError(w, fmt.Sprintf("Exceeded %d BSO per request", BATCH_MAX_IDS),
+	if len(bsoToBeProcessed) > s.config.MaxPOSTRecords {
+		JSONError(w, fmt.Sprintf("Exceeded %d BSO per request", s.config.MaxPOSTRecords),
 			http.StatusRequestEntityTooLarge)
 		return
 	}
@@ -529,15 +522,6 @@ func (s *SyncUserHandler) hCollectionPOST(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// change posted[].TTL from seconds (what clients send)
-	// to milliseconds (what the DB uses)
-	for _, p := range bsoToBeProcessed {
-		if p.TTL != nil {
-			tmp := *p.TTL * 1000
-			p.TTL = &tmp
-		}
-	}
-
 	// Send the changes to the database and merge
 	// with `results` above
 	postResults, err := s.db.PostBSOs(cId, bsoToBeProcessed)
@@ -545,19 +529,195 @@ func (s *SyncUserHandler) hCollectionPOST(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		InternalError(w, r, err)
 	} else {
-		m := syncstorage.ModifiedToString(postResults.Modified)
-
 		for bsoId, failMessage := range postResults.Failed {
 			results.Failed[bsoId] = failMessage
 		}
 
-		w.Header().Set("X-Last-Modified", m)
+		w.Header().Set("X-Last-Modified", syncstorage.ModifiedToString(postResults.Modified))
 		JsonNewline(w, r, &PostResults{
-			Modified: m,
+			Modified: postResults.Modified,
 			Success:  postResults.Success,
 			Failed:   results.Failed,
 		})
 	}
+
+}
+
+// hCollectionPOSTBatch handles batch=? requests. It is called internally by hCollectionPOST
+// to handle batch request logic
+func (s *SyncUserHandler) hCollectionPOSTBatch(w http.ResponseWriter, r *http.Request) {
+
+	// check client provided headers to quickly determine if batch exceeds limits
+	// this is meant to be a cheap(er) check without actually having to parse the
+	// data provided by the user
+	for _, headerName := range []string{"X-Weave-Total-Records", "X-Weave-Total-Bytes", "X-Weave-Records", "X-Weave-Bytes"} {
+		if strVal := r.Header.Get(headerName); strVal != "" {
+			if intVal, err := strconv.Atoi(strVal); err == nil {
+				max := 0
+				switch headerName {
+				case "X-Weave-Total-Records":
+					max = s.config.MaxTotalRecords
+				case "X-Weave-Total-Bytes":
+					max = s.config.MaxTotalBytes
+				case "X-Weave-Bytes":
+					max = s.config.MaxPOSTBytes
+				case "X-Weave-Records":
+					max = s.config.MaxPOSTRecords
+				}
+
+				if intVal > max {
+					WeaveSizeLimitExceeded(w, r)
+					return
+				}
+			} else {
+				// header value is invalid (not an int)
+				JSONError(w, "Invalid integer value for "+headerName, http.StatusBadRequest)
+				return
+			}
+		}
+	}
+
+	// check the POST size (if we can)
+	if r.ContentLength > 0 && r.ContentLength > int64(s.config.MaxPOSTBytes) {
+		WeaveSizeLimitExceeded(w, r)
+		return
+	}
+
+	bsoToBeProcessed, results, err := RequestToPostBSOInput(r)
+	if err != nil {
+		WeaveInvalidWBOError(w, r)
+		return
+	}
+
+	// Too many sent?
+	if len(bsoToBeProcessed) > s.config.MaxPOSTRecords {
+		JSONError(w, fmt.Sprintf("Exceeded %d BSO per request", s.config.MaxPOSTRecords),
+			http.StatusRequestEntityTooLarge)
+		return
+	}
+
+	// BSO validation errors? don't even start a Batch
+	if len(results.Failed) > 0 {
+		modified := syncstorage.Now()
+		w.Header().Set("X-Last-Modified", syncstorage.ModifiedToString(modified))
+		JsonNewline(w, r, &PostResults{
+			Modified: modified,
+			Success:  nil,
+			Failed:   results.Failed,
+		})
+		return
+	}
+
+	_, batchId, batchCommit := GetBatchIdAndCommit(r)
+	cId, err := s.getcid(r, true) // automake the collection if it doesn't exit
+	if err != nil {
+		if err == syncstorage.ErrInvalidCollectionName {
+			JSONError(w, err.Error(), http.StatusBadRequest)
+		} else {
+			InternalError(w, r, err)
+		}
+		return
+	}
+
+	// Assert: Batch Id Provided exists
+	var batchIdInt int
+	if batchId != "true" {
+		id, err := strconv.Atoi(batchId)
+
+		if err != nil {
+			JSONError(w, "Invalid BatchId Format", http.StatusBadRequest)
+			return
+		}
+
+		if _, err := s.db.BatchLoad(id, cId); err != nil {
+			if err == syncstorage.ErrNotFound {
+				JSONError(w, "Batch Id Not Found", http.StatusBadRequest)
+			} else {
+				InternalError(w, r, err)
+			}
+			return
+		}
+
+		batchIdInt = id
+	}
+
+	// marshal into a newline separated blob
+	buf := new(bytes.Buffer)
+	if len(bsoToBeProcessed) > 0 {
+		encoder := json.NewEncoder(buf)
+		for _, bso := range bsoToBeProcessed {
+			if err := encoder.Encode(bso); err != nil { // Note: this writes a newline after each record
+				// whoa... presumably should never happen
+				InternalError(w, r, errors.Wrap(err, "Failed encoding BSO for payload"))
+				return
+			}
+		}
+	}
+
+	modified := syncstorage.Now()
+	if batchId == "true" {
+		newBatchId, err := s.db.BatchCreate(cId, buf.String())
+		if err != nil {
+			InternalError(w, r, errors.Wrap(err, "Failed creating batch"))
+			return
+		}
+
+		batchIdInt = newBatchId
+
+	} else if len(bsoToBeProcessed) > 0 {
+		err := s.db.BatchAppend(batchIdInt, cId, buf.String())
+		if err != nil {
+			InternalError(w, r, errors.Wrap(err, fmt.Sprintf("Failed append to batch id:%d", batchIdInt)))
+			return
+		}
+
+	}
+
+	if batchCommit == false {
+		w.Header().Set("X-Last-Modified", syncstorage.ModifiedToString(modified))
+		JsonNewline(w, r, &PostResults{
+			Batch:    batchIdInt,
+			Modified: modified,
+		})
+	} else {
+		// COMMIT a batch...
+		batchRecord, err := s.db.BatchLoad(batchIdInt, cId)
+		if err != nil {
+			InternalError(w, r, errors.Wrap(err, "Failed Loading Batch to commit"))
+			return
+		}
+
+		rawJSON := ReadNewlineJSON(bytes.NewBufferString(batchRecord.BSOS))
+
+		postData := make(syncstorage.PostBSOInput, len(rawJSON), len(rawJSON))
+		for i, bsoJSON := range rawJSON {
+			var bso syncstorage.PutBSOInput
+			if parseErr := parseIntoBSO(bsoJSON, &bso); parseErr != nil {
+				// well there is definitely a bug somewhere
+				InternalError(w, r, errors.Wrap(parseErr, "Could not decode batch data"))
+				return
+			} else {
+				postData[i] = &bso
+			}
+		}
+
+		postResults, err := s.db.PostBSOs(cId, postData)
+		if err != nil {
+			InternalError(w, r, err)
+			return
+		}
+
+		// delete the batch
+		s.db.BatchRemove(batchIdInt)
+
+		w.Header().Set("X-Last-Modified", syncstorage.ModifiedToString(modified))
+		JsonNewline(w, r, &PostResults{
+			Modified: postResults.Modified,
+			Success:  postResults.Success,
+			Failed:   postResults.Failed,
+		})
+	}
+
 }
 
 func (s *SyncUserHandler) hCollectionDELETE(w http.ResponseWriter, r *http.Request) {
@@ -589,7 +749,7 @@ func (s *SyncUserHandler) hCollectionDELETE(w http.ResponseWriter, r *http.Reque
 
 		bidlist := strings.Split(bids[0], ",")
 
-		if len(bidlist) > BATCH_MAX_IDS {
+		if len(bidlist) > s.config.MaxPOSTRecords {
 			JSONError(w, "exceeded max batch size", http.StatusBadRequest)
 			return
 		}

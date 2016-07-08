@@ -32,12 +32,29 @@ func main() {
 
 	var router http.Handler
 
+	syncLimitConfig := web.NewDefaultSyncUserHandlerConfig()
+	if config.Limit.MaxBSOGetLimit != 0 {
+		syncLimitConfig.MaxBSOGetLimit = config.Limit.MaxBSOGetLimit
+	}
+	if config.Limit.MaxPOSTRecords != 0 {
+		syncLimitConfig.MaxPOSTRecords = config.Limit.MaxPOSTRecords
+	}
+	if config.Limit.MaxPOSTBytes != 0 {
+		syncLimitConfig.MaxPOSTBytes = config.Limit.MaxPOSTBytes
+	}
+	if config.Limit.MaxTotalBytes != 0 {
+		syncLimitConfig.MaxTotalBytes = config.Limit.MaxTotalBytes
+	}
+	if config.Limit.MaxTotalRecords != 0 {
+		syncLimitConfig.MaxTotalRecords = config.Limit.MaxTotalRecords
+	}
+
 	// The base functionality is the sync 1.5 api + legacy weave hacks
 	poolHandler := web.NewSyncPoolHandler(&web.SyncPoolConfig{
 		Basepath:    config.DataDir,
 		NumPools:    config.Pool.Num,
 		MaxPoolSize: config.Pool.MaxSize,
-	})
+	}, syncLimitConfig)
 	router = web.NewWeaveHandler(poolHandler)
 
 	// All sync 1.5 access requires Hawk Authorization
@@ -80,10 +97,15 @@ func main() {
 	}
 
 	log.WithFields(log.Fields{
-		"addr":          listenOn,
-		"PID":           os.Getpid(),
-		"POOL_NUM":      config.Pool.Num,
-		"POOL_MAX_SIZE": config.Pool.MaxSize,
+		"addr":                    listenOn,
+		"PID":                     os.Getpid(),
+		"POOL_NUM":                config.Pool.Num,
+		"POOL_MAX_SIZE":           config.Pool.MaxSize,
+		"LIMIT_MAX_BSO_GET_LIMIT": syncLimitConfig.MaxBSOGetLimit,
+		"LIMIT_MAX_POST_RECORDS":  syncLimitConfig.MaxPOSTRecords,
+		"LIMIT_MAX_POST_BYTES":    syncLimitConfig.MaxPOSTBytes,
+		"LIMIT_MAX_TOTAL_RECORDS": syncLimitConfig.MaxTotalRecords,
+		"LIMIT_MAX_TOTAL_BYTES":   syncLimitConfig.MaxTotalBytes,
 	}).Info("HTTP Listening at " + listenOn)
 
 	err := httpdown.ListenAndServe(server, hd)
