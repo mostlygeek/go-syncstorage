@@ -46,6 +46,7 @@ The server has a few knobs that can be tweaked.
 | `LIMIT_MAX_POST_RECORDS` |  Maximum number of BSOs per POST request. Default 100. |
 | `LIMIT_MAX_TOTAL_BYTES` |  Maximum total size of a POST batch job. Default: 26,214,400 (20MB). |
 | `LIMIT_MAX_TOTAL_RECORDS` | Maximum total BSOs in a POST batch job. Default 1000. |
+| `LIMIT_MAX_BATCH_TTL` | Maximum TTL for a batch to remain uncommitted in seconds. Default 7200 (2 hours). |
 
 ## Advanced Configuration
 Things that probably shouldn't be touched:

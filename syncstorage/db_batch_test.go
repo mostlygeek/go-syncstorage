@@ -112,3 +112,33 @@ func TestBatchRemove(t *testing.T) {
 		assert.Equal(ErrBatchNotFound, err)
 	}
 }
+
+func TestBatchPurge(t *testing.T) {
+	assert := assert.New(t)
+	data := "some data\n"
+
+	db, err := getTestDB()
+	if !assert.NoError(err) {
+		return
+	}
+	cId := 1
+
+	batchId, err := db.BatchCreate(cId, data)
+	if !assert.NoError(err) {
+		return
+	}
+	assert.Equal(1, batchId)
+
+	{
+		time.Sleep(time.Millisecond * 10)
+		numPurged, err := db.BatchPurge(1) // purge everything older than a ms
+		if !assert.NoError(err) {
+			return
+		}
+		assert.Equal(1, numPurged)
+
+		_, err = db.BatchLoad(batchId, cId)
+		assert.Equal(ErrBatchNotFound, err)
+	}
+
+}

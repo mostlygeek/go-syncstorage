@@ -114,3 +114,17 @@ func (d *DB) BatchRemove(id int) error {
 	tx.Commit()
 	return nil
 }
+
+func (d *DB) BatchPurge(TTL int) (int, error) {
+
+	d.Lock()
+	defer d.Unlock()
+
+	r, err := d.db.Exec("DELETE FROM Batches WHERE (? - Modified) >= ?", Now(), TTL)
+	if err != nil {
+		return 0, err
+	}
+
+	purged, err := r.RowsAffected()
+	return int(purged), err
+}

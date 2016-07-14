@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"strconv"
@@ -47,6 +48,9 @@ func main() {
 	}
 	if config.Limit.MaxTotalRecords != 0 {
 		syncLimitConfig.MaxTotalRecords = config.Limit.MaxTotalRecords
+	}
+	if config.Limit.MaxBatchTTL != 0 {
+		syncLimitConfig.MaxBatchTTL = config.Limit.MaxBatchTTL * 1000
 	}
 
 	// The base functionality is the sync 1.5 api + legacy weave hacks
@@ -106,6 +110,7 @@ func main() {
 		"LIMIT_MAX_POST_BYTES":    syncLimitConfig.MaxPOSTBytes,
 		"LIMIT_MAX_TOTAL_RECORDS": syncLimitConfig.MaxTotalRecords,
 		"LIMIT_MAX_TOTAL_BYTES":   syncLimitConfig.MaxTotalBytes,
+		"LIMIT_MAX_BATCH_TTL":     fmt.Sprintf("%d seconds", syncLimitConfig.MaxBatchTTL/1000),
 	}).Info("HTTP Listening at " + listenOn)
 
 	err := httpdown.ListenAndServe(server, hd)

@@ -29,6 +29,7 @@ type UserHandlerConfig struct {
 	MaxPOSTBytes    int `envconfig:"default=0"`
 	MaxTotalRecords int `envconfig:"default=0"`
 	MaxTotalBytes   int `envconfig:"default=0"`
+	MaxBatchTTL     int `envconfig:"default=0"`
 }
 
 type PoolConfig struct {
@@ -130,6 +131,9 @@ func init() {
 	}
 	if Config.Limit.MaxTotalBytes < 0 {
 		log.Fatal("LIMIT_MAX_TOTAL_BYTES must be >= 0")
+	}
+	if Config.Limit.MaxBatchTTL < 0 {
+		log.Fatal("LIMIT_MAX_BATCH_TTL must be > 0")
 	}
 
 	Hostname = Config.Hostname

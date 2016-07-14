@@ -27,6 +27,7 @@ type SyncUserHandlerConfig struct {
 	MaxPOSTBytes    int
 	MaxTotalRecords int
 	MaxTotalBytes   int
+	MaxBatchTTL     int
 }
 
 func NewDefaultSyncUserHandlerConfig() *SyncUserHandlerConfig {
@@ -39,6 +40,9 @@ func NewDefaultSyncUserHandlerConfig() *SyncUserHandlerConfig {
 		MaxPOSTBytes:    2 * 1024 * 1024,
 		MaxTotalRecords: 1000,
 		MaxTotalBytes:   20 * 1024 * 1024,
+
+		// batches older than this are likely to be purged
+		MaxBatchTTL: 2 * 60 * 60 * 1000, // 2 hours in milliseconds
 	}
 }
 
@@ -103,17 +107,28 @@ func NewSyncUserHandler(uid string, db *syncstorage.DB, config *SyncUserHandlerC
 	storage.HandleFunc("/{collection}/{bsoId}", server.hBsoDELETE).Methods("DELETE")
 
 	// Purge Expired BSOs
-	numPurged, err := db.PurgeExpired()
+	numBSOPurged, err := db.PurgeExpired()
 	if err != nil {
 		log.WithFields(log.Fields{
 			"uid": uid,
 			"err": err.Error(),
-		}).Error("NewSyncUserHandler Purge - Fail")
-	} else {
+		}).Error("NewSyncUserHandler - Error purging expired BSOs")
+	}
+
+	numBatchesPurged, err := db.BatchPurge(config.MaxBatchTTL)
+	if err != nil {
 		log.WithFields(log.Fields{
-			"uid":         uid,
-			"bsos_purged": numPurged,
-		}).Info("NewSyncUserHandler Purge - OK")
+			"uid": uid,
+			"err": err.Error(),
+		}).Error("NewSyncUserHandler - Error purging expired Batches")
+	}
+
+	if err == nil {
+		log.WithFields(log.Fields{
+			"uid":            uid,
+			"bsos_purged":    numBSOPurged,
+			"batches_purged": numBatchesPurged,
+		}).Info("NewSyncUserHandler - Purge OK")
 	}
 
 	return server
