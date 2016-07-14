@@ -51,8 +51,6 @@ var (
 	Pool        *PoolConfig
 	EnablePprof bool
 
-	Limit *UserHandlerConfig
-
 	DisableHTTPLogs bool
 )
 
