@@ -142,3 +142,22 @@ func TestBatchPurge(t *testing.T) {
 	}
 
 }
+
+func TestBatchExists(t *testing.T) {
+
+	assert := assert.New(t)
+
+	db, _ := getTestDB()
+	batchId, err := db.BatchCreate(1, "hello")
+	if !assert.NoError(err) {
+		return
+	}
+
+	exists, err := db.BatchExists(batchId, 1)
+	assert.True(exists)
+	assert.NoError(err)
+
+	notExists, err := db.BatchExists(2, 1)
+	assert.False(notExists)
+	assert.NoError(err)
+}

@@ -79,6 +79,24 @@ func (d *DB) BatchAppend(id, cId int, data string) (err error) {
 	return
 }
 
+// BatchExists checks if a batch exists without loading all the data from disk
+func (d *DB) BatchExists(id, cId int) (bool, error) {
+	d.Lock()
+	defer d.Unlock()
+
+	var foundId int
+	err := d.db.QueryRow("SELECT Id FROM Batches WHERE Id=? AND CollectionId=?", id, cId).Scan(&foundId)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+
+		return false, errors.Wrap(err, "BatchExists failed")
+	}
+
+	return true, nil
+}
+
 func (d *DB) BatchLoad(id, cId int) (*BatchRecord, error) {
 	d.Lock()
 	defer d.Unlock()

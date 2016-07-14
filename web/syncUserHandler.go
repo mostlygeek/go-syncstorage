@@ -562,7 +562,7 @@ func (s *SyncUserHandler) hCollectionPOSTClassic(w http.ResponseWriter, r *http.
 // to handle batch request logic
 func (s *SyncUserHandler) hCollectionPOSTBatch(w http.ResponseWriter, r *http.Request) {
 
-	// check client provided headers to quickly determine if batch exceeds limits
+	// CHECK client provided headers to quickly determine if batch exceeds limits
 	// this is meant to be a cheap(er) check without actually having to parse the
 	// data provided by the user
 	for _, headerName := range []string{"X-Weave-Total-Records", "X-Weave-Total-Bytes", "X-Weave-Records", "X-Weave-Bytes"} {
@@ -592,26 +592,27 @@ func (s *SyncUserHandler) hCollectionPOSTBatch(w http.ResponseWriter, r *http.Re
 		}
 	}
 
-	// check the POST size (if we can)
+	// CHECK the POST size, if possible from client supplied data
 	if r.ContentLength > 0 && r.ContentLength > int64(s.config.MaxPOSTBytes) {
 		WeaveSizeLimitExceeded(w, r)
 		return
 	}
 
+	// EXTRACT actual data to check
 	bsoToBeProcessed, results, err := RequestToPostBSOInput(r)
 	if err != nil {
 		WeaveInvalidWBOError(w, r)
 		return
 	}
 
-	// Too many sent?
+	// CHECK actual BSOs sent to see if they exceed limits
 	if len(bsoToBeProcessed) > s.config.MaxPOSTRecords {
 		JSONError(w, fmt.Sprintf("Exceeded %d BSO per request", s.config.MaxPOSTRecords),
 			http.StatusRequestEntityTooLarge)
 		return
 	}
 
-	// BSO validation errors? don't even start a Batch
+	// CHECK BSO validation errors. Don't even start a Batch if there are.
 	if len(results.Failed) > 0 {
 		modified := syncstorage.Now()
 		w.Header().Set("X-Last-Modified", syncstorage.ModifiedToString(modified))
@@ -623,6 +624,7 @@ func (s *SyncUserHandler) hCollectionPOSTBatch(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	// Get batch id, commit command and internal collection Id
 	_, batchId, batchCommit := GetBatchIdAndCommit(r)
 	cId, err := s.getcid(r, true) // automake the collection if it doesn't exit
 	if err != nil {
@@ -634,7 +636,8 @@ func (s *SyncUserHandler) hCollectionPOSTBatch(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Assert: Batch Id Provided exists
+	// CHECK batch id is valid for appends. Do this before loading and decoding
+	// the body to be more efficient.
 	var batchIdInt int
 	if batchId != "true" {
 		id, err := strconv.Atoi(batchId)
@@ -644,7 +647,7 @@ func (s *SyncUserHandler) hCollectionPOSTBatch(w http.ResponseWriter, r *http.Re
 			return
 		}
 
-		if _, err := s.db.BatchLoad(id, cId); err != nil {
+		if _, err := s.db.BatchExists(id, cId); err != nil {
 			if err == syncstorage.ErrNotFound {
 				JSONError(w, "Batch Id Not Found", http.StatusBadRequest)
 			} else {
@@ -656,7 +659,7 @@ func (s *SyncUserHandler) hCollectionPOSTBatch(w http.ResponseWriter, r *http.Re
 		batchIdInt = id
 	}
 
-	// marshal into a newline separated blob
+	// JSON Serialize the data for storage in the DB
 	buf := new(bytes.Buffer)
 	if len(bsoToBeProcessed) > 0 {
 		encoder := json.NewEncoder(buf)
@@ -669,7 +672,7 @@ func (s *SyncUserHandler) hCollectionPOSTBatch(w http.ResponseWriter, r *http.Re
 		}
 	}
 
-	modified := syncstorage.Now()
+	// Save either as a new batch or append to an existing batch
 	if batchId == "true" {
 		newBatchId, err := s.db.BatchCreate(cId, buf.String())
 		if err != nil {
@@ -678,7 +681,6 @@ func (s *SyncUserHandler) hCollectionPOSTBatch(w http.ResponseWriter, r *http.Re
 		}
 
 		batchIdInt = newBatchId
-
 	} else if len(bsoToBeProcessed) > 0 {
 		err := s.db.BatchAppend(batchIdInt, cId, buf.String())
 		if err != nil {
@@ -688,14 +690,7 @@ func (s *SyncUserHandler) hCollectionPOSTBatch(w http.ResponseWriter, r *http.Re
 
 	}
 
-	if batchCommit == false {
-		w.Header().Set("X-Last-Modified", syncstorage.ModifiedToString(modified))
-		JsonNewline(w, r, &PostResults{
-			Batch:    batchIdInt,
-			Modified: modified,
-		})
-	} else {
-		// COMMIT a batch...
+	if batchCommit {
 		batchRecord, err := s.db.BatchLoad(batchIdInt, cId)
 		if err != nil {
 			InternalError(w, r, errors.Wrap(err, "Failed Loading Batch to commit"))
@@ -703,12 +698,11 @@ func (s *SyncUserHandler) hCollectionPOSTBatch(w http.ResponseWriter, r *http.Re
 		}
 
 		rawJSON := ReadNewlineJSON(bytes.NewBufferString(batchRecord.BSOS))
-
 		postData := make(syncstorage.PostBSOInput, len(rawJSON), len(rawJSON))
 		for i, bsoJSON := range rawJSON {
 			var bso syncstorage.PutBSOInput
 			if parseErr := parseIntoBSO(bsoJSON, &bso); parseErr != nil {
-				// well there is definitely a bug somewhere
+				// well there is definitely a bug somewhere if this happens
 				InternalError(w, r, errors.Wrap(parseErr, "Could not decode batch data"))
 				return
 			} else {
@@ -722,14 +716,21 @@ func (s *SyncUserHandler) hCollectionPOSTBatch(w http.ResponseWriter, r *http.Re
 			return
 		}
 
-		// delete the batch
+		// DELETE the batch from the DB
 		s.db.BatchRemove(batchIdInt)
 
-		w.Header().Set("X-Last-Modified", syncstorage.ModifiedToString(modified))
+		w.Header().Set("X-Last-Modified", syncstorage.ModifiedToString(postResults.Modified))
 		JsonNewline(w, r, &PostResults{
 			Modified: postResults.Modified,
 			Success:  postResults.Success,
 			Failed:   postResults.Failed,
+		})
+	} else {
+		modified := syncstorage.Now()
+		w.Header().Set("X-Last-Modified", syncstorage.ModifiedToString(modified))
+		JsonNewline(w, r, &PostResults{
+			Batch:    batchIdInt,
+			Modified: modified,
 		})
 	}
 
