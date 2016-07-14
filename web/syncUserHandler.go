@@ -698,6 +698,19 @@ func (s *SyncUserHandler) hCollectionPOSTBatch(w http.ResponseWriter, r *http.Re
 		}
 
 		rawJSON := ReadNewlineJSON(bytes.NewBufferString(batchRecord.BSOS))
+
+		// CHECK final data before committing it to the database
+		if len(rawJSON) > s.config.MaxTotalRecords {
+			log.WithFields(log.Fields{
+				"uid":       s.uid,
+				"now":       syncstorage.Now(),
+				"bso_count": len(rawJSON),
+			}).Error("Batch has too many BSOs to commit")
+			s.db.BatchRemove(batchIdInt)
+			WeaveSizeLimitExceeded(w, r)
+			return
+		}
+
 		postData := make(syncstorage.PostBSOInput, len(rawJSON), len(rawJSON))
 		for i, bsoJSON := range rawJSON {
 			var bso syncstorage.PutBSOInput
@@ -707,6 +720,26 @@ func (s *SyncUserHandler) hCollectionPOSTBatch(w http.ResponseWriter, r *http.Re
 				return
 			} else {
 				postData[i] = &bso
+			}
+		}
+
+		// CHECK that actual Batch data size
+		sum := 0
+		for _, bso := range postData {
+			if bso.Payload == nil {
+				continue
+			}
+
+			sum := sum + len(*bso.Payload)
+			if sum > s.config.MaxTotalBytes {
+				log.WithFields(log.Fields{
+					"uid":       s.uid,
+					"now":       syncstorage.Now(),
+					"bso_count": len(rawJSON),
+				}).Error("Batch size exceeded MaxTotalBytes limit")
+				s.db.BatchRemove(batchIdInt)
+				WeaveSizeLimitExceeded(w, r)
+				return
 			}
 		}
 
