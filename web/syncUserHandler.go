@@ -23,6 +23,7 @@ type SyncUserHandlerConfig struct {
 	MaxBSOGetLimit int
 
 	// API Limits
+	MaxRequestBytes int
 	MaxPOSTRecords  int
 	MaxPOSTBytes    int
 	MaxTotalRecords int
@@ -36,6 +37,7 @@ func NewDefaultSyncUserHandlerConfig() *SyncUserHandlerConfig {
 		MaxBSOGetLimit: 2500,
 
 		// API Limits
+		MaxRequestBytes: 2 * 1024 * 1024,
 		MaxPOSTRecords:  100,
 		MaxPOSTBytes:    2 * 1024 * 1024,
 		MaxTotalRecords: 1000,
@@ -328,11 +330,17 @@ func (s *SyncUserHandler) hInfoCollectionCounts(w http.ResponseWriter, r *http.R
 
 func (s *SyncUserHandler) hInfoConfiguration(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, `{"max_post_records":%d,"max_post_bytes":%d,"max_total_records":%d,"max_total_bytes":%d}`,
+	fmt.Fprintf(w, `{
+		"max_post_records":%d,
+		"max_post_bytes":%d,
+		"max_total_records":%d,
+		"max_total_bytes":%d,
+		"max_request_bytes":%d}`,
 		s.config.MaxPOSTRecords,
 		s.config.MaxPOSTBytes,
 		s.config.MaxTotalRecords,
 		s.config.MaxTotalBytes,
+		s.config.MaxRequestBytes,
 	)
 }
 

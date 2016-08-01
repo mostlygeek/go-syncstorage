@@ -24,6 +24,7 @@ type LogConfig struct {
 
 // configures limits for web/SyncUserHandler
 type UserHandlerConfig struct {
+	MaxRequestBytes int `envconfig:"default=0"`
 	MaxBSOGetLimit  int `envconfig:"default=0"`
 	MaxPOSTRecords  int `envconfig:"default=0"`
 	MaxPOSTBytes    int `envconfig:"default=0"`

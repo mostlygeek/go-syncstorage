@@ -34,6 +34,9 @@ func main() {
 	var router http.Handler
 
 	syncLimitConfig := web.NewDefaultSyncUserHandlerConfig()
+	if config.Limit.MaxRequestBytes != 0 {
+		syncLimitConfig.MaxRequestBytes = config.Limit.MaxRequestBytes
+	}
 	if config.Limit.MaxBSOGetLimit != 0 {
 		syncLimitConfig.MaxBSOGetLimit = config.Limit.MaxBSOGetLimit
 	}
@@ -110,6 +113,7 @@ func main() {
 		"LIMIT_MAX_POST_BYTES":    syncLimitConfig.MaxPOSTBytes,
 		"LIMIT_MAX_TOTAL_RECORDS": syncLimitConfig.MaxTotalRecords,
 		"LIMIT_MAX_TOTAL_BYTES":   syncLimitConfig.MaxTotalBytes,
+		"LIMIT_MAX_REQUEST_BYTES": syncLimitConfig.MaxRequestBytes,
 		"LIMIT_MAX_BATCH_TTL":     fmt.Sprintf("%d seconds", syncLimitConfig.MaxBatchTTL/1000),
 	}).Info("HTTP Listening at " + listenOn)
 

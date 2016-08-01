@@ -38,6 +38,7 @@ func TestSyncUserHandlerInfoConfiguration(t *testing.T) {
 		MaxPOSTRecords:  2,
 		MaxTotalBytes:   3,
 		MaxTotalRecords: 4,
+		MaxRequestBytes: 5,
 	}
 
 	handler := NewSyncUserHandler(uid, db, config)
@@ -48,7 +49,6 @@ func TestSyncUserHandlerInfoConfiguration(t *testing.T) {
 
 	jdata := make(map[string]int)
 	if err := json.Unmarshal(resp.Body.Bytes(), &jdata); assert.NoError(err) {
-
 		if val, ok := jdata["max_post_bytes"]; assert.True(ok, "max_post_bytes") {
 			assert.Equal(val, config.MaxPOSTBytes)
 		}
@@ -60,6 +60,9 @@ func TestSyncUserHandlerInfoConfiguration(t *testing.T) {
 		}
 		if val, ok := jdata["max_total_records"]; assert.True(ok, "max_total_records") {
 			assert.Equal(val, config.MaxTotalRecords)
+		}
+		if val, ok := jdata["max_request_bytes"]; assert.True(ok, "max_request_bytes") {
+			assert.Equal(val, config.MaxRequestBytes)
 		}
 	}
 }
