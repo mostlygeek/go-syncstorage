@@ -500,20 +500,39 @@ func (s *SyncUserHandler) hCollectionPOST(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	cId, err := s.getcid(r, true) // automake the collection if it doesn't exit
+	if err != nil {
+		if err == syncstorage.ErrInvalidCollectionName {
+			JSONError(w, err.Error(), http.StatusBadRequest)
+		} else {
+			InternalError(w, r, err)
+		}
+		return
+	}
+
+	// handle X-If-Unmodified-Since and X-If-Modified-Since
+	cmodified, err := s.db.GetCollectionModified(cId)
+	if err != nil {
+		InternalError(w, r, err)
+		return
+	} else if sentNotModified(w, r, cmodified) {
+		return
+	}
+
 	batchFound, batchId, batchCommit := GetBatchIdAndCommit(r)
 	if batchCommit && !batchFound {
 		JSONError(w, "Batch ID required", http.StatusBadRequest)
 		return
 	} else if batchId != "" || (batchId == "true" && batchCommit == false) {
-		s.hCollectionPOSTBatch(w, r)
+		s.hCollectionPOSTBatch(cId, w, r)
 	} else {
-		s.hCollectionPOSTClassic(w, r)
+		s.hCollectionPOSTClassic(cId, w, r)
 	}
 }
 
 // hCollectionPOSTClassic is the historical POST handling logic prior to
 // the addition of atomic commits from multiple POST requests
-func (s *SyncUserHandler) hCollectionPOSTClassic(w http.ResponseWriter, r *http.Request) {
+func (s *SyncUserHandler) hCollectionPOSTClassic(collectionId int, w http.ResponseWriter, r *http.Request) {
 
 	bsoToBeProcessed, results, err := RequestToPostBSOInput(r)
 	if err != nil {
@@ -527,27 +546,9 @@ func (s *SyncUserHandler) hCollectionPOSTClassic(w http.ResponseWriter, r *http.
 		return
 	}
 
-	cId, err := s.getcid(r, true) // automake the collection if it doesn't exit
-	if err != nil {
-		if err == syncstorage.ErrInvalidCollectionName {
-			JSONError(w, err.Error(), http.StatusBadRequest)
-		} else {
-			InternalError(w, r, err)
-		}
-		return
-	}
-
-	cmodified, err := s.db.GetCollectionModified(cId)
-	if err != nil {
-		InternalError(w, r, err)
-		return
-	} else if sentNotModified(w, r, cmodified) {
-		return
-	}
-
 	// Send the changes to the database and merge
 	// with `results` above
-	postResults, err := s.db.PostBSOs(cId, bsoToBeProcessed)
+	postResults, err := s.db.PostBSOs(collectionId, bsoToBeProcessed)
 
 	if err != nil {
 		InternalError(w, r, err)
@@ -563,12 +564,11 @@ func (s *SyncUserHandler) hCollectionPOSTClassic(w http.ResponseWriter, r *http.
 			Failed:   results.Failed,
 		})
 	}
-
 }
 
 // hCollectionPOSTBatch handles batch=? requests. It is called internally by hCollectionPOST
 // to handle batch request logic
-func (s *SyncUserHandler) hCollectionPOSTBatch(w http.ResponseWriter, r *http.Request) {
+func (s *SyncUserHandler) hCollectionPOSTBatch(collectionId int, w http.ResponseWriter, r *http.Request) {
 
 	// CHECK client provided headers to quickly determine if batch exceeds limits
 	// this is meant to be a cheap(er) check without actually having to parse the
@@ -634,15 +634,6 @@ func (s *SyncUserHandler) hCollectionPOSTBatch(w http.ResponseWriter, r *http.Re
 
 	// Get batch id, commit command and internal collection Id
 	_, batchId, batchCommit := GetBatchIdAndCommit(r)
-	cId, err := s.getcid(r, true) // automake the collection if it doesn't exit
-	if err != nil {
-		if err == syncstorage.ErrInvalidCollectionName {
-			JSONError(w, err.Error(), http.StatusBadRequest)
-		} else {
-			InternalError(w, r, err)
-		}
-		return
-	}
 
 	// CHECK batch id is valid for appends. Do this before loading and decoding
 	// the body to be more efficient.
@@ -655,7 +646,7 @@ func (s *SyncUserHandler) hCollectionPOSTBatch(w http.ResponseWriter, r *http.Re
 			return
 		}
 
-		if _, err := s.db.BatchExists(id, cId); err != nil {
+		if _, err := s.db.BatchExists(id, collectionId); err != nil {
 			if err == syncstorage.ErrNotFound {
 				JSONError(w, "Batch Id Not Found", http.StatusBadRequest)
 			} else {
@@ -682,7 +673,7 @@ func (s *SyncUserHandler) hCollectionPOSTBatch(w http.ResponseWriter, r *http.Re
 
 	// Save either as a new batch or append to an existing batch
 	if batchId == "true" {
-		newBatchId, err := s.db.BatchCreate(cId, buf.String())
+		newBatchId, err := s.db.BatchCreate(collectionId, buf.String())
 		if err != nil {
 			InternalError(w, r, errors.Wrap(err, "Failed creating batch"))
 			return
@@ -690,7 +681,7 @@ func (s *SyncUserHandler) hCollectionPOSTBatch(w http.ResponseWriter, r *http.Re
 
 		batchIdInt = newBatchId
 	} else if len(bsoToBeProcessed) > 0 {
-		err := s.db.BatchAppend(batchIdInt, cId, buf.String())
+		err := s.db.BatchAppend(batchIdInt, collectionId, buf.String())
 		if err != nil {
 			InternalError(w, r, errors.Wrap(err, fmt.Sprintf("Failed append to batch id:%d", batchIdInt)))
 			return
@@ -699,7 +690,7 @@ func (s *SyncUserHandler) hCollectionPOSTBatch(w http.ResponseWriter, r *http.Re
 	}
 
 	if batchCommit {
-		batchRecord, err := s.db.BatchLoad(batchIdInt, cId)
+		batchRecord, err := s.db.BatchLoad(batchIdInt, collectionId)
 		if err != nil {
 			InternalError(w, r, errors.Wrap(err, "Failed Loading Batch to commit"))
 			return
@@ -751,7 +742,7 @@ func (s *SyncUserHandler) hCollectionPOSTBatch(w http.ResponseWriter, r *http.Re
 			}
 		}
 
-		postResults, err := s.db.PostBSOs(cId, postData)
+		postResults, err := s.db.PostBSOs(collectionId, postData)
 		if err != nil {
 			InternalError(w, r, err)
 			return
