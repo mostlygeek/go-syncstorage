@@ -52,7 +52,7 @@ func (p *PostResults) MarshalJSON() ([]byte, error) {
 	buf.WriteString(syncstorage.ModifiedToString(p.Modified))
 	buf.WriteString(",")
 	if len(p.Success) == 0 {
-		buf.WriteString(`"success":null`)
+		buf.WriteString(`"success":[]`)
 	} else {
 		buf.WriteString(`"success":`)
 		data, err := json.Marshal(p.Success)
@@ -67,7 +67,7 @@ func (p *PostResults) MarshalJSON() ([]byte, error) {
 
 	buf.WriteString(",")
 	if len(p.Failed) == 0 {
-		buf.WriteString(`"failed":null`)
+		buf.WriteString(`"failed":{}`)
 	} else {
 		buf.WriteString(`"failed":`)
 		data, err := json.Marshal(p.Failed)
