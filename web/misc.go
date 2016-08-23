@@ -358,3 +358,26 @@ func OKResponse(w http.ResponseWriter, s string) {
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprint(w, s)
 }
+
+// sendRequestProblem logs the problem with the client's request
+// and responds with a json payload of the error. Client side these
+// are usually invisible so this helps with debugging
+func sendRequestProblem(w http.ResponseWriter, req *http.Request, responseCode int, reason error) {
+	var causeMessage string
+	if cause := errors.Cause(reason); cause != nil && cause != reason {
+		causeMessage = fmt.Sprintf("%v", cause)
+	} else {
+		causeMessage = "n/a"
+	}
+
+	log.WithFields(log.Fields{
+		"method":    req.Method,
+		"path":      req.URL.Path,
+		"ua":        req.UserAgent(),
+		"http_code": responseCode,
+		"error":     reason.Error(),
+		"cause":     causeMessage,
+	}).Warning("HTTP Request Problem")
+
+	JSONError(w, reason.Error(), responseCode)
+}

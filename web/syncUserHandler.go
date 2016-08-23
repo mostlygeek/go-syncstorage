@@ -375,7 +375,7 @@ func (s *SyncUserHandler) hCollectionGET(w http.ResponseWriter, r *http.Request)
 	}
 
 	if err = r.ParseForm(); err != nil {
-		JSONError(w, "Bad query parameters", http.StatusBadRequest)
+		sendRequestProblem(w, r, http.StatusBadRequest, errors.Wrap(err, "Bad query parameters"))
 		return
 	}
 
@@ -383,7 +383,7 @@ func (s *SyncUserHandler) hCollectionGET(w http.ResponseWriter, r *http.Request)
 		ids = strings.Split(v, ",")
 
 		if len(ids) > s.config.MaxPOSTRecords {
-			JSONError(w, "exceeded max batch size", http.StatusBadRequest)
+			sendRequestProblem(w, r, http.StatusBadRequest, errors.New("Exceeded max batch size"))
 			return
 		}
 
@@ -392,13 +392,13 @@ func (s *SyncUserHandler) hCollectionGET(w http.ResponseWriter, r *http.Request)
 			if syncstorage.BSOIdOk(id) {
 				ids[i] = id
 			} else {
-				JSONError(w, fmt.Sprintf("Invalid bso id %s", id), http.StatusBadRequest)
+				sendRequestProblem(w, r, http.StatusBadRequest, errors.Errorf("Invalid bso id %s", id))
 				return
 			}
 		}
 
 		if len(ids) > 100 {
-			JSONError(w, fmt.Sprintf("Too many ids provided"), http.StatusRequestEntityTooLarge)
+			sendRequestProblem(w, r, http.StatusBadRequest, errors.New("Too many ids provided"))
 			return
 		}
 	}
@@ -408,13 +408,13 @@ func (s *SyncUserHandler) hCollectionGET(w http.ResponseWriter, r *http.Request)
 	if v := r.Form.Get("newer"); v != "" {
 		floatNew, err := strconv.ParseFloat(v, 64)
 		if err != nil {
-			JSONError(w, "Invalid newer param format", http.StatusBadRequest)
+			sendRequestProblem(w, r, http.StatusBadRequest, errors.Wrap(err, "Invalid newer param format"))
 			return
 		}
 
 		newer = int(floatNew * 1000)
 		if !syncstorage.NewerOk(newer) {
-			JSONError(w, "Invalid newer value", http.StatusBadRequest)
+			sendRequestProblem(w, r, http.StatusBadRequest, errors.New("Invalid newer value"))
 			return
 		}
 	}
@@ -426,7 +426,13 @@ func (s *SyncUserHandler) hCollectionGET(w http.ResponseWriter, r *http.Request)
 	if v := r.Form.Get("limit"); v != "" {
 		limit, err = strconv.Atoi(v)
 		if err != nil || !syncstorage.LimitOk(limit) {
-			JSONError(w, "Invalid limit value", http.StatusBadRequest)
+			errMessage := "Invalid limit value"
+			if err != nil {
+				err = errors.Wrap(err, errMessage)
+			} else {
+				err = errors.New(errMessage)
+			}
+			sendRequestProblem(w, r, http.StatusBadRequest, err)
 			return
 		}
 	}
@@ -439,7 +445,13 @@ func (s *SyncUserHandler) hCollectionGET(w http.ResponseWriter, r *http.Request)
 	if v := r.Form.Get("offset"); v != "" {
 		offset, err = strconv.Atoi(v)
 		if err != nil || !syncstorage.OffsetOk(offset) {
-			JSONError(w, "Invalid offset value", http.StatusBadRequest)
+			errMessage := "Invalid offset value"
+			if err != nil {
+				err = errors.Wrap(err, errMessage)
+			} else {
+				err = errors.New(errMessage)
+			}
+			sendRequestProblem(w, r, http.StatusBadRequest, err)
 			return
 		}
 	}
@@ -453,7 +465,7 @@ func (s *SyncUserHandler) hCollectionGET(w http.ResponseWriter, r *http.Request)
 		case "index":
 			sort = syncstorage.SORT_INDEX
 		default:
-			JSONError(w, "Invalid sort value", http.StatusBadRequest)
+			sendRequestProblem(w, r, http.StatusBadRequest, errors.New("Invalid sort value"))
 			return
 		}
 	}
@@ -496,14 +508,14 @@ func (s *SyncUserHandler) hCollectionPOST(w http.ResponseWriter, r *http.Request
 	// accept text/plain from old (broken) clients
 	ct := r.Header.Get("Content-Type")
 	if ct != "application/json" && ct != "text/plain" && ct != "application/newlines" {
-		JSONError(w, "Not acceptable Content-Type", http.StatusUnsupportedMediaType)
+		sendRequestProblem(w, r, http.StatusUnsupportedMediaType, errors.Errorf("Not acceptable Content-Type: %s", ct))
 		return
 	}
 
 	cId, err := s.getcid(r, true) // automake the collection if it doesn't exit
 	if err != nil {
 		if err == syncstorage.ErrInvalidCollectionName {
-			JSONError(w, err.Error(), http.StatusBadRequest)
+			sendRequestProblem(w, r, http.StatusBadRequest, errors.Wrap(err, "Invalid collection name"))
 		} else {
 			InternalError(w, r, err)
 		}
@@ -521,7 +533,7 @@ func (s *SyncUserHandler) hCollectionPOST(w http.ResponseWriter, r *http.Request
 
 	batchFound, batchId, batchCommit := GetBatchIdAndCommit(r)
 	if batchCommit && !batchFound {
-		JSONError(w, "Batch ID required", http.StatusBadRequest)
+		sendRequestProblem(w, r, http.StatusBadRequest, errors.New("Batch ID expected with commit"))
 		return
 	} else if batchId != "" || (batchId == "true" && batchCommit == false) {
 		s.hCollectionPOSTBatch(cId, w, r)
@@ -541,8 +553,8 @@ func (s *SyncUserHandler) hCollectionPOSTClassic(collectionId int, w http.Respon
 	}
 
 	if len(bsoToBeProcessed) > s.config.MaxPOSTRecords {
-		JSONError(w, fmt.Sprintf("Exceeded %d BSO per request", s.config.MaxPOSTRecords),
-			http.StatusRequestEntityTooLarge)
+		sendRequestProblem(w, r, http.StatusRequestEntityTooLarge,
+			errors.Errorf("Exceed %d BSO per request", s.config.MaxPOSTRecords))
 		return
 	}
 
@@ -594,7 +606,7 @@ func (s *SyncUserHandler) hCollectionPOSTBatch(collectionId int, w http.Response
 				}
 			} else {
 				// header value is invalid (not an int)
-				JSONError(w, "Invalid integer value for "+headerName, http.StatusBadRequest)
+				sendRequestProblem(w, r, http.StatusBadRequest, errors.Errorf("Invalid integer value for %s", headerName))
 				return
 			}
 		}
@@ -615,8 +627,8 @@ func (s *SyncUserHandler) hCollectionPOSTBatch(collectionId int, w http.Response
 
 	// CHECK actual BSOs sent to see if they exceed limits
 	if len(bsoToBeProcessed) > s.config.MaxPOSTRecords {
-		JSONError(w, fmt.Sprintf("Exceeded %d BSO per request", s.config.MaxPOSTRecords),
-			http.StatusRequestEntityTooLarge)
+		sendRequestProblem(w, r, http.StatusRequestEntityTooLarge,
+			errors.Errorf("Exceeded %d BSO per request", s.config.MaxPOSTRecords))
 		return
 	}
 
@@ -642,13 +654,13 @@ func (s *SyncUserHandler) hCollectionPOSTBatch(collectionId int, w http.Response
 		id, err := strconv.Atoi(batchId)
 
 		if err != nil {
-			JSONError(w, "Invalid BatchId Format", http.StatusBadRequest)
+			sendRequestProblem(w, r, http.StatusBadRequest, errors.Wrap(err, "Invalid Batch ID Format"))
 			return
 		}
 
 		if _, err := s.db.BatchExists(id, collectionId); err != nil {
 			if err == syncstorage.ErrNotFound {
-				JSONError(w, "Batch Id Not Found", http.StatusBadRequest)
+				sendRequestProblem(w, r, http.StatusBadRequest, errors.Wrapf(err, "Batch id: %d does not exist", id))
 			} else {
 				InternalError(w, r, err)
 			}
@@ -798,7 +810,7 @@ func (s *SyncUserHandler) hCollectionDELETE(w http.ResponseWriter, r *http.Reque
 		bidlist := strings.Split(bids[0], ",")
 
 		if len(bidlist) > s.config.MaxPOSTRecords {
-			JSONError(w, "exceeded max batch size", http.StatusBadRequest)
+			sendRequestProblem(w, r, http.StatusBadRequest, errors.New("Exceeded max batch size"))
 			return
 		}
 
@@ -841,7 +853,7 @@ func (s *SyncUserHandler) hBsoGET(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		if err == syncstorage.ErrNotFound {
-			JSONError(w, "Collection Not Found", http.StatusNotFound)
+			sendRequestProblem(w, r, http.StatusNotFound, errors.Wrap(err, "Collection Not Found"))
 		} else {
 			InternalError(w, r, err)
 		}
@@ -865,7 +877,7 @@ func (s *SyncUserHandler) hBsoGET(w http.ResponseWriter, r *http.Request) {
 		JsonNewline(w, r, bso)
 	} else {
 		if err == syncstorage.ErrNotFound {
-			JSONError(w, "BSO Not Found", http.StatusNotFound)
+			sendRequestProblem(w, r, http.StatusNotFound, errors.Wrap(err, "BSO Not Found"))
 		} else {
 			InternalError(w, r, err)
 		}
@@ -880,7 +892,7 @@ func (s *SyncUserHandler) hBsoPUT(w http.ResponseWriter, r *http.Request) {
 	// accept text/plain from old (broken) clients
 	ct := r.Header.Get("Content-Type")
 	if ct != "application/json" && ct != "text/plain" && ct != "application/newlines" {
-		JSONError(w, "Not acceptable Content-Type", http.StatusUnsupportedMediaType)
+		sendRequestProblem(w, r, http.StatusUnsupportedMediaType, errors.Errorf("Not acceptable Content-Type: %s", ct))
 		return
 	}
 
@@ -937,9 +949,9 @@ func (s *SyncUserHandler) hBsoPUT(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		if err == syncstorage.ErrPayloadTooBig {
-			JSONError(w,
-				http.StatusText(http.StatusRequestEntityTooLarge),
-				http.StatusRequestEntityTooLarge)
+			sendRequestProblem(w, r,
+				http.StatusRequestEntityTooLarge,
+				errors.Wrap(err, "Payload too big"))
 			return
 		}
 
