@@ -130,7 +130,6 @@ func (s *CacheHandler) infoCollection(uid string, w http.ResponseWriter, req *ht
 
 	// cache the results for next time if successful response
 	if cacheWriter.code == http.StatusOK {
-
 		data := make([]byte, cacheWriter.Len()+lastModifiedBytes)
 
 		copy(data, w.Header().Get("X-Last-Modified"))

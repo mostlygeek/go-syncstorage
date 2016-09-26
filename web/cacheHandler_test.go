@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/mozilla-services/go-syncstorage/syncstorage"
+	"github.com/mozilla-services/go-syncstorage/token"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -162,7 +163,16 @@ func BenchmarkCacheHandler(b *testing.B) {
 		db.TouchCollection(cId, cId*1000) // turn the cId into milliseconds
 	}
 
+	req, err := http.NewRequest("GET", "/storage/12345/info/collections", nil)
+	req.Header.Set("Accept", "application/json")
+	if err != nil {
+		panic(err)
+	}
+	session := &Session{Token: token.TokenPayload{Uid: 12345}}
+	reqCtx := req.WithContext(NewSessionContext(req.Context(), session))
+
 	for i := 0; i < b.N; i++ {
-		request("GET", syncurl(uid, "info/collections"), nil, handler)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, reqCtx)
 	}
 }
