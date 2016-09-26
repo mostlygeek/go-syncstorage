@@ -83,52 +83,65 @@ func (s *CacheHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 					"uid": uid,
 				}).Debug("CacheHandler clear")
 			}
-			s.cache.Set(lastModifiedKey(uid), []byte{})
-			s.cache.Set(uid, []byte{})
+			s.cache.Set(uid, nil)
 		}
 		s.handler.ServeHTTP(w, req)
 		return
 	}
 }
 
-func lastModifiedKey(uid string) string {
-	return ("l" + uid)
-}
+// for serialization of the json body and last modified header
+// values into one []byte. The X-Last-Modified timestamp is 13 bytes
+// ie: 1234567890.12.
+// TODO: update this to 14 before my 307th birthday on Nov 20th, 2286.
+const lastModifiedBytes = 13
 
 // infoCollection caches a user's info/collection data. It will clear
 // the cached data if a POST, PUT, or DELETE method is done
 func (s *CacheHandler) infoCollection(uid string, w http.ResponseWriter, req *http.Request) {
+	// cache hit
+	if data, err := s.cache.Get(uid); err == nil && len(data) > 0 {
+		// TODO in change this
+		lastModified := string(data[:lastModifiedBytes])
 
-	lmkey := lastModifiedKey(uid)
+		if log.GetLevel() == log.DebugLevel {
+			log.WithFields(log.Fields{
+				"uid":      uid,
+				"modified": lastModified,
+				"data_len": len(data) - lastModifiedBytes,
+			}).Debug("CacheHandler HIT")
+		}
 
-	if lm, err := s.cache.Get(lmkey); err == nil && len(lm) > 0 {
-		modified, _ := ConvertTimestamp(string(lm))
+		modified, _ := ConvertTimestamp(lastModified)
 		if sentNotModified(w, req, modified) {
 			return
 		}
 
-		if data, err := s.cache.Get(uid); err == nil && len(data) > 0 {
-			// add the the X-Last-Modified header
-			w.Header().Set("Content-Type", "application/json")
-			w.Header().Set("X-Last-Modified", string(lm))
-			io.Copy(w, bytes.NewReader(data))
-			return
-		}
+		// add the the X-Last-Modified header
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Last-Modified", lastModified)
+		io.Copy(w, bytes.NewReader(data[lastModifiedBytes:]))
+		return
 	}
 
-	// fill the cache ...
+	// cache miss...
 	cacheWriter := newCacheResponseWriter(w)
 	s.handler.ServeHTTP(cacheWriter, req)
 
 	// cache the results for next time if successful response
 	if cacheWriter.code == http.StatusOK {
-		s.cache.Set(uid, cacheWriter.Bytes())
-		s.cache.Set(lmkey, []byte(w.Header().Get("X-Last-Modified")))
+
+		data := make([]byte, cacheWriter.Len()+lastModifiedBytes)
+
+		copy(data, w.Header().Get("X-Last-Modified"))
+		copy(data[lastModifiedBytes:], cacheWriter.Bytes())
+
+		s.cache.Set(uid, data)
 		if log.GetLevel() == log.DebugLevel {
 			log.WithFields(log.Fields{
 				"uid":      uid,
 				"modified": w.Header().Get("X-Last-Modified"),
-			}).Debug("CacheHandler Set info/collections")
+			}).Debug("CacheHandler MISS")
 		}
 	}
 }
@@ -173,6 +186,10 @@ func (c *cacheResponseWriter) Write(b []byte) (int, error) {
 
 func (c *cacheResponseWriter) Bytes() []byte {
 	return c.buf.Bytes()
+}
+
+func (c *cacheResponseWriter) Len() int {
+	return c.buf.Len()
 }
 
 func newCacheResponseWriter(w http.ResponseWriter) *cacheResponseWriter {

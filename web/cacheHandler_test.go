@@ -120,7 +120,7 @@ func TestCacheHandlerInfoCollections(t *testing.T) {
 		}
 		for _, cName := range collections {
 			cId, _ := db.GetCollectionId(cName)
-			db.TouchCollection(cId, cId*1000) // turn the cId into milliseconds
+			db.TouchCollection(cId, syncstorage.Now()+cId) // turn the cId into milliseconds
 		}
 
 		resp := request("GET", syncurl(uid, "info/collections"), nil, handler)
