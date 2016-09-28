@@ -65,20 +65,20 @@ func (h *HawkHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	auth, err := hawk.NewAuthFromRequest(r, nil, h.hawkNonceNotFound)
 	if err != nil {
 		if e, ok := err.(hawk.AuthFormatError); ok {
-			sendRequestProblem(w, r, http.StatusBadRequest,
+			sendRequestProblem(w, r, http.StatusForbidden,
 				errors.Errorf("Hawk: Malformed hawk header, field: %s, err: %s", e.Field, e.Err))
 		} else if authError, ok := err.(hawk.AuthError); ok {
 			w.Header().Set("WWW-Authenticate", "Hawk")
 			switch authError {
 			case hawk.ErrReplay: // log the replay'd nonce
 				authInfo, _ := hawk.ParseRequestHeader(r.Header.Get("Authorization"))
-				sendRequestProblem(w, r, http.StatusBadRequest,
+				sendRequestProblem(w, r, http.StatusForbidden,
 					errors.Errorf("Hawk: Replay nonce=%s", authInfo.Nonce))
 			default:
-				sendRequestProblem(w, r, http.StatusBadRequest, errors.Wrap(err, "Hawk: AuthError"))
+				sendRequestProblem(w, r, http.StatusForbidden, errors.Wrap(err, "Hawk: AuthError"))
 			}
 		} else {
-			sendRequestProblem(w, r, http.StatusBadRequest, errors.Wrap(err, "Hawk: Unknown Error"))
+			sendRequestProblem(w, r, http.StatusForbidden, errors.Wrap(err, "Hawk: Unknown Error"))
 		}
 		return
 	}
@@ -109,7 +109,7 @@ func (h *HawkHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Step 3: Make sure it's valid...
 	if err := auth.Valid(); err != nil {
 		w.Header().Set("WWW-Authenticate", "Hawk")
-		sendRequestProblem(w, r, http.StatusUnauthorized, errors.Wrap(err, "Hawk: auth invalid"))
+		sendRequestProblem(w, r, http.StatusForbidden, errors.Wrap(err, "Hawk: auth invalid"))
 		return
 	}
 
@@ -152,7 +152,7 @@ func (h *HawkHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		pHash.Sum(content)
 		if !auth.ValidHash(pHash) {
 			w.Header().Set("WWW-Authenticate", "Hawk")
-			sendRequestProblem(w, r, http.StatusBadRequest,
+			sendRequestProblem(w, r, http.StatusForbidden,
 				errors.New("Hawk: payload hash invalid"))
 			return
 		}
