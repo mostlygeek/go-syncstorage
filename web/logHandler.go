@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/Sirupsen/logrus"
@@ -102,12 +103,14 @@ type MozlogFormatter struct {
 	Pid      int
 }
 
+var encoderPool = sync.Pool{
+	New: func() interface{} {
+		return new(bytes.Buffer)
+	},
+}
+
 // Format a logrus.Entry into a mozlog JSON object
 func (f *MozlogFormatter) Format(entry *logrus.Entry) ([]byte, error) {
-
-	if entry.Message != "" {
-		entry.Data["msg"] = entry.Message
-	}
 
 	m := &mozlog{
 		Timestamp:  entry.Time.UnixNano(),
@@ -126,6 +129,10 @@ func (f *MozlogFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 		}
 	}
 
+	if entry.Message != "" {
+		entry.Data["msg"] = entry.Message
+	}
+
 	switch entry.Level {
 	case logrus.PanicLevel:
 		m.Severity = 1
@@ -141,8 +148,14 @@ func (f *MozlogFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 		m.Severity = 7
 	}
 
-	var b bytes.Buffer
-	enc := json.NewEncoder(&b)
+	b := encoderPool.Get().(*bytes.Buffer)
+	defer func() {
+		b.Reset()
+		encoderPool.Put(b)
+	}()
+
+	// encode the fields in there
+	enc := json.NewEncoder(b)
 	if err := enc.Encode(m); err != nil {
 		return nil, err
 	}
