@@ -38,8 +38,8 @@ type TokenPayload struct {
 	Expires float64 `json:"expires"`
 
 	// fields added in https://github.com/mozilla-services/tokenserver/pull/93
-	FxaUID   string `json:fxa_uid`
-	DeviceId string `json:device_id`
+	FxaUID   string `json:"fxa_uid"`
+	DeviceId string `json:"device_id"`
 }
 
 func (t *TokenPayload) UidString() string {
