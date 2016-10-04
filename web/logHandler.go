@@ -8,16 +8,18 @@ import (
 	"net/http"
 	"time"
 
-	log "github.com/Sirupsen/logrus"
+	"github.com/Sirupsen/logrus"
+	"github.com/mozilla-services/go-syncstorage/token"
 )
 
 // NewLogHandler return a http.Handler that wraps h and logs
 // request out to logrus INFO level with fields
-func NewLogHandler(h http.Handler) http.Handler {
-	return &LoggingHandler{h}
+func NewLogHandler(l logrus.FieldLogger, h http.Handler) http.Handler {
+	return &LoggingHandler{l, h}
 }
 
 type LoggingHandler struct {
+	logger  logrus.FieldLogger
 	handler http.Handler
 }
 
@@ -26,8 +28,16 @@ func (h *LoggingHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	url := *req.URL
 
 	start := time.Now()
+
+	// process it
 	h.handler.ServeHTTP(logger, req)
-	took := int(time.Duration(time.Now().Sub(start).Nanoseconds()) / time.Millisecond)
+
+	took := int(time.Duration(time.Since(start).Nanoseconds()) / time.Millisecond)
+
+	var tokenPayload token.TokenPayload
+	if session, ok := SessionFromContext(req.Context()); ok {
+		tokenPayload = session.Token
+	}
 
 	uri := req.RequestURI
 
@@ -41,11 +51,15 @@ func (h *LoggingHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		uri = url.RequestURI()
 	}
 
-	logMsg := fmt.Sprintf("%s %s %d %d %d",
-		req.Method, uri,
-		logger.Status(),
-		req.ContentLength,
-		logger.Size())
+	// don't write out a msg if
+	var logMsg string
+	if l, ok := h.logger.(*logrus.Logger); ok {
+		if _, ok := l.Formatter.(*MozlogFormatter); !ok {
+			logMsg = fmt.Sprintf("%s %s %d",
+				req.Method, uri,
+				logger.Status())
+		}
+	}
 
 	errno := logger.Status()
 	if errno == http.StatusOK {
@@ -53,24 +67,20 @@ func (h *LoggingHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// common fields to log with every request
-	fields := log.Fields{
-		"agent":  req.UserAgent(),
-		"errno":  errno,
-		"method": req.Method,
-		"path":   uri,
-		"req_sz": req.ContentLength,
-		"res_sz": logger.Size(),
-		"t":      took,
-		"uid":    extractUID(uri),
+	fields := logrus.Fields{
+		"agent":     req.UserAgent(),
+		"errno":     errno,
+		"method":    req.Method,
+		"path":      uri,
+		"req_sz":    req.ContentLength,
+		"res_sz":    logger.Size(),
+		"t":         took,
+		"uid":       extractUID(uri),
+		"fxa_uid":   tokenPayload.FxaUID,
+		"device_id": tokenPayload.DeviceId,
 	}
 
-	if log.GetLevel() == log.DebugLevel {
-		//fields["req_header"] = req.Header
-		//fields["res_header"] = logger.Header()
-		log.WithFields(fields).Debug(logMsg)
-	} else {
-		log.WithFields(fields).Info(logMsg)
-	}
+	h.logger.WithFields(fields).Info(logMsg)
 }
 
 // mozlog represents the MozLog standard format https://github.com/mozilla-services/Dockerflow/blob/master/docs/mozlog.md
@@ -82,7 +92,7 @@ type mozlog struct {
 	EnvVersion string
 	Pid        int
 	Severity   uint8
-	Fields     log.Fields
+	Fields     logrus.Fields
 }
 
 // MozlogFormatter is a custom logrus formatter
@@ -92,20 +102,20 @@ type MozlogFormatter struct {
 }
 
 // Format a logrus.Entry into a mozlog JSON object
-func (f *MozlogFormatter) Format(entry *log.Entry) ([]byte, error) {
+func (f *MozlogFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 	var severity uint8
 	switch entry.Level {
-	case log.PanicLevel:
+	case logrus.PanicLevel:
 		severity = 1
-	case log.FatalLevel:
+	case logrus.FatalLevel:
 		severity = 2
-	case log.ErrorLevel:
+	case logrus.ErrorLevel:
 		severity = 3
-	case log.WarnLevel:
+	case logrus.WarnLevel:
 		severity = 4
-	case log.InfoLevel:
+	case logrus.InfoLevel:
 		severity = 6
-	case log.DebugLevel:
+	case logrus.DebugLevel:
 		severity = 7
 
 	}
@@ -117,7 +127,10 @@ func (f *MozlogFormatter) Format(entry *log.Entry) ([]byte, error) {
 		}
 	}
 
-	entry.Data["msg"] = entry.Message
+	if entry.Message != "" {
+		entry.Data["msg"] = entry.Message
+	}
+
 	m := &mozlog{
 		Timestamp:  entry.Time.UnixNano(),
 		Type:       logType,
