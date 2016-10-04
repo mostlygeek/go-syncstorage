@@ -2,6 +2,7 @@ package web
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -103,29 +104,6 @@ type MozlogFormatter struct {
 
 // Format a logrus.Entry into a mozlog JSON object
 func (f *MozlogFormatter) Format(entry *logrus.Entry) ([]byte, error) {
-	var severity uint8
-	switch entry.Level {
-	case logrus.PanicLevel:
-		severity = 1
-	case logrus.FatalLevel:
-		severity = 2
-	case logrus.ErrorLevel:
-		severity = 3
-	case logrus.WarnLevel:
-		severity = 4
-	case logrus.InfoLevel:
-		severity = 6
-	case logrus.DebugLevel:
-		severity = 7
-
-	}
-
-	logType := "system"
-	if _, ok := entry.Data["method"]; ok {
-		if _, ok2 := entry.Data["path"]; ok2 {
-			logType = "request.summary"
-		}
-	}
 
 	if entry.Message != "" {
 		entry.Data["msg"] = entry.Message
@@ -133,21 +111,44 @@ func (f *MozlogFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 
 	m := &mozlog{
 		Timestamp:  entry.Time.UnixNano(),
-		Type:       logType,
+		Type:       "system",
 		Logger:     "go-syncstorage",
 		Hostname:   f.Hostname,
 		EnvVersion: "2.0",
 		Pid:        f.Pid,
-		Severity:   severity,
+		Severity:   0,
 		Fields:     entry.Data,
 	}
 
-	serialized, err := json.Marshal(m)
-	if err != nil {
-		return nil, err
+	if _, ok := entry.Data["method"]; ok {
+		if _, ok2 := entry.Data["path"]; ok2 {
+			m.Type = "request.summary"
+		}
 	}
 
-	return append(serialized, '\n'), nil
+	switch entry.Level {
+	case logrus.PanicLevel:
+		m.Severity = 1
+	case logrus.FatalLevel:
+		m.Severity = 2
+	case logrus.ErrorLevel:
+		m.Severity = 3
+	case logrus.WarnLevel:
+		m.Severity = 4
+	case logrus.InfoLevel:
+		m.Severity = 6
+	case logrus.DebugLevel:
+		m.Severity = 7
+	}
+
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	if err := enc.Encode(m); err != nil {
+		return nil, err
+	}
+	b.WriteString("\n")
+
+	return b.Bytes(), nil
 }
 
 /*

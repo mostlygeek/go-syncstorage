@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/Sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
@@ -61,6 +62,58 @@ func TestLogHandler(t *testing.T) {
 	for key, test := range tests {
 		assert.Equal(test, record.Fields[key], fmt.Sprintf("Key: %s", key))
 	}
+}
+
+func TestLogHandlerMozlogFormatter(t *testing.T) {
+	assert := assert.New(t)
+	fields := logrus.Fields{
+		"agent":     "benchmark agent",
+		"errno":     float64(0),
+		"method":    "GET",
+		"path":      "/so/fassst",
+		"req_sz":    float64(0),
+		"res_sz":    float64(1024),
+		"t":         float64(20),
+		"uid":       "123456",
+		"fxa_uid":   "123456",
+		"device_id": "7654321",
+	}
+
+	entry := logrus.WithFields(fields)
+	entry.Level = logrus.InfoLevel
+	entry.Time = time.Date(2013, time.January, 14, 0, 0, 0, 0, time.FixedZone("UTC", 0))
+
+	formatter := &MozlogFormatter{
+		Hostname: "test.localdomain",
+		Pid:      os.Getpid(),
+	}
+
+	logData, err := formatter.Format(entry)
+	if !assert.NoError(err) {
+		return
+	}
+
+	var record mozlog
+	if err := json.Unmarshal(logData, &record); !assert.NoError(err) {
+		return
+	}
+
+	assert.True(record.Timestamp > 0)
+	assert.Equal("request.summary", record.Type)
+	assert.Equal("go-syncstorage", record.Logger)
+	assert.Equal("test.localdomain", record.Hostname)
+	assert.Equal("2.0", record.EnvVersion)
+	assert.Equal(os.Getpid(), record.Pid)
+	assert.Equal(uint8(6), record.Severity)
+
+	// field test
+	for key, test := range fields {
+		assert.Equal(test, record.Fields[key], fmt.Sprintf("Key: %s", key))
+	}
+
+	// make sure there's a new line at the end
+	assert.Equal("\n", string(logData[len(logData)-1:]))
+
 }
 
 func BenchmarkMozlogFormatter(b *testing.B) {
