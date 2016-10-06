@@ -172,10 +172,6 @@ func TestLogHandlerMozlogFormatter(t *testing.T) {
 	for key, test := range fields {
 		assert.Equal(test, record.Fields[key], fmt.Sprintf("Key: %s", key))
 	}
-
-	// make sure there's a new line at the end
-	assert.Equal("\n", string(logData[len(logData)-1:]))
-
 }
 
 func BenchmarkMozlogFormatter(b *testing.B) {
