@@ -764,7 +764,7 @@ func (s *SyncUserHandler) hCollectionPOSTBatch(collectionId int, w http.Response
 		return
 	}
 
-	// CHECK BSO validation errors. Don't even start a Batch if there are.
+	// CHECK BSO decoding validation errors. Don't even start a Batch if there are.
 	if len(results.Failed) > 0 {
 		modified := syncstorage.Now()
 		w.Header().Set("X-Last-Modified", syncstorage.ModifiedToString(modified))
@@ -788,22 +788,53 @@ func (s *SyncUserHandler) hCollectionPOSTBatch(collectionId int, w http.Response
 			return
 		}
 
-		if _, err := s.db.BatchExists(id, collectionId); err != nil {
-			if err == syncstorage.ErrNotFound {
-				sendRequestProblem(w, r, http.StatusBadRequest,
-					errors.Wrapf(err, "Batch id: %s does not exist", batchId))
-			} else {
-				InternalError(w, r, err)
-			}
-			return
+		if found, err := s.db.BatchExists(id, collectionId); err != nil {
+			InternalError(w, r, err)
+		} else if !found {
+			sendRequestProblem(w, r, http.StatusBadRequest,
+				errors.Errorf("Batch id: %s does not exist", batchId))
 		}
+	}
+
+	filteredBSOs := make([]*syncstorage.PutBSOInput, 0, len(bsoToBeProcessed))
+	failures := make(map[string][]string)
+
+	for _, putInput := range bsoToBeProcessed {
+		var failId string
+		var failReason string
+
+		if !syncstorage.BSOIdOk(putInput.Id) {
+			failId = "na"
+			failReason = fmt.Sprintf("Invalid BSO id %s", putInput.Id)
+		}
+
+		if putInput.SortIndex != nil && !syncstorage.SortIndexOk(*putInput.SortIndex) {
+			failId = putInput.Id
+			failReason = fmt.Sprintf("Invalid sort index for: %s", putInput.Id)
+		}
+
+		if putInput.TTL != nil && !syncstorage.TTLOk(*putInput.TTL) {
+			failId = putInput.Id
+			failReason = fmt.Sprintf("Invalid TTL for: %s", putInput.Id)
+		}
+
+		if failReason != "" {
+			if failures[failId] == nil {
+				failures[failId] = []string{failReason}
+			} else {
+				failures[failId] = append(failures[failId], failReason)
+			}
+			continue
+		}
+
+		filteredBSOs = append(filteredBSOs, putInput)
 	}
 
 	// JSON Serialize the data for storage in the DB
 	buf := new(bytes.Buffer)
-	if len(bsoToBeProcessed) > 0 {
+	if len(filteredBSOs) > 0 {
 		encoder := json.NewEncoder(buf)
-		for _, bso := range bsoToBeProcessed {
+		for _, bso := range filteredBSOs {
 			if err := encoder.Encode(bso); err != nil { // Note: this writes a newline after each record
 				// whoa... presumably should never happen
 				InternalError(w, r, errors.Wrap(err, "Failed encoding BSO for payload"))
@@ -832,7 +863,7 @@ func (s *SyncUserHandler) hCollectionPOSTBatch(collectionId int, w http.Response
 			return
 		}
 
-		if len(bsoToBeProcessed) > 0 { // append only if something to do
+		if len(filteredBSOs) > 0 { // append only if something to do
 			if err := s.db.BatchAppend(id, collectionId, buf.String()); err != nil {
 				InternalError(w, r, errors.Wrap(err, fmt.Sprintf("Failed append to batch id:%d", dbBatchId)))
 				return
@@ -896,6 +927,15 @@ func (s *SyncUserHandler) hCollectionPOSTBatch(collectionId int, w http.Response
 			return
 		}
 
+		// merge failures
+		for key, reasons := range postResults.Failed {
+			if failures[key] == nil {
+				failures[key] = reasons
+			} else {
+				failures[key] = append(failures[key], reasons...)
+			}
+		}
+
 		// DELETE the batch from the DB
 		s.db.BatchRemove(dbBatchId)
 
@@ -903,14 +943,21 @@ func (s *SyncUserHandler) hCollectionPOSTBatch(collectionId int, w http.Response
 		JsonNewline(w, r, &PostResults{
 			Modified: postResults.Modified,
 			Success:  postResults.Success,
-			Failed:   postResults.Failed,
+			Failed:   failures,
 		})
 	} else {
 		modified := syncstorage.Now()
 		w.Header().Set("X-Last-Modified", syncstorage.ModifiedToString(modified))
-		JsonNewline(w, r, &PostResults{
+		successIds := make([]string, len(filteredBSOs))
+		for i, b := range filteredBSOs {
+			successIds[i] = b.Id
+		}
+
+		JsonNewlineStatus(w, r, http.StatusAccepted, &PostResults{
 			Batch:    batchIdString(dbBatchId),
 			Modified: modified,
+			Success:  successIds,
+			Failed:   failures,
 		})
 	}
 }
