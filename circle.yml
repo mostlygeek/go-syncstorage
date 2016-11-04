@@ -58,11 +58,6 @@ dependencies:
     - test -e $CIRCLE_ARTIFACTS/bin || mkdir -p $CIRCLE_ARTIFACTS/bin
     - cp go-syncstorage $CIRCLE_ARTIFACTS/bin/go-syncstorage-linux-amd64-$CIRCLE_SHA1
 
-    # custom build of mozilla/server-syncstorage w/ latest batch API tests
-    # just used to ensure the go server passes the python functional tests
-    # as well
-    - docker pull mozilla/go-syncstorage:python-tester
-
 test:
   override:
     - cd "$B" && go vet ./token ./syncstorage ./web
@@ -80,7 +75,12 @@ test:
     - >
         docker run
         --net=host
-        mozilla/go-syncstorage:python-tester
+        mozilla/go-syncstorage:python-tester-master
+        test_endpoint "http://127.0.0.1:8888#secret"
+    - >
+        docker run
+        --net=host
+        mozilla/go-syncstorage:python-tester-batch
         test_endpoint "http://127.0.0.1:8888#secret"
 
 deployment:
