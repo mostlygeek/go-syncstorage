@@ -847,6 +847,8 @@ func (s *SyncUserHandler) hCollectionPOSTBatch(collectionId int, w http.Response
 	var dbBatchId int
 	//   - batchIdInt used to track the internal batchId number in the database after
 	//   - the create || append
+
+	appendedOkIds := make([]string, 0, len(filteredBSOs))
 	if batchId == "true" {
 		newBatchId, err := s.db.BatchCreate(collectionId, buf.String())
 		if err != nil {
@@ -855,7 +857,6 @@ func (s *SyncUserHandler) hCollectionPOSTBatch(collectionId int, w http.Response
 		}
 
 		dbBatchId = newBatchId
-
 	} else {
 		id, err := batchIdInt(batchId)
 		if err != nil {
@@ -868,9 +869,18 @@ func (s *SyncUserHandler) hCollectionPOSTBatch(collectionId int, w http.Response
 				InternalError(w, r, errors.Wrap(err, fmt.Sprintf("Failed append to batch id:%d", dbBatchId)))
 				return
 			}
+
 		}
 
 		dbBatchId = id
+	}
+
+	// The success list only includes the BSO Ids in the
+	// POST request. These need to kept to be sent back in
+	// the response. Matches the python server's behaviour / passes
+	// the tests
+	for _, bso := range filteredBSOs {
+		appendedOkIds = append(appendedOkIds, bso.Id)
 	}
 
 	if batchCommit {
@@ -940,23 +950,19 @@ func (s *SyncUserHandler) hCollectionPOSTBatch(collectionId int, w http.Response
 		s.db.BatchRemove(dbBatchId)
 
 		w.Header().Set("X-Last-Modified", syncstorage.ModifiedToString(postResults.Modified))
+
 		JsonNewline(w, r, &PostResults{
 			Modified: postResults.Modified,
-			Success:  postResults.Success,
+			Success:  appendedOkIds,
 			Failed:   failures,
 		})
 	} else {
 		modified := syncstorage.Now()
 		w.Header().Set("X-Last-Modified", syncstorage.ModifiedToString(modified))
-		successIds := make([]string, len(filteredBSOs))
-		for i, b := range filteredBSOs {
-			successIds[i] = b.Id
-		}
-
 		JsonNewlineStatus(w, r, http.StatusAccepted, &PostResults{
 			Batch:    batchIdString(dbBatchId),
 			Modified: modified,
-			Success:  successIds,
+			Success:  appendedOkIds,
 			Failed:   failures,
 		})
 	}
