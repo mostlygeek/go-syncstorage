@@ -75,12 +75,7 @@ test:
     - >
         docker run
         --net=host
-        mozilla/go-syncstorage:python-tester-master
-        test_endpoint "http://127.0.0.1:8888#secret"
-    - >
-        docker run
-        --net=host
-        mozilla/go-syncstorage:python-tester-batch
+        mozilla/go-syncstorage:python-tester
         test_endpoint "http://127.0.0.1:8888#secret"
 
 deployment:
