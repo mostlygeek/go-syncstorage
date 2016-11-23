@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"math/rand"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -159,7 +160,7 @@ func (s *SyncUserHandler) TidyUp(minPurge, maxPurge time.Duration, vacuumKB int)
 
 	logFields := log.Fields{
 		"uid": s.uid,
-		"db":  s.db.Path,
+		"db":  path.Base(s.db.Path),
 	}
 
 	var freeKB int
