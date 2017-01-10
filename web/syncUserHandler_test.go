@@ -314,8 +314,9 @@ func TestSyncUserHandlerPOSTBatch(t *testing.T) {
 		respCommit := requestheaders("POST", url+"?commit=1&batch="+batchIdString, bodyCommit, header, handler)
 		assert.Equal(http.StatusOK, respCommit.Code, respCommit.Body.String())
 
-		commitLM := respCommit.Header().Get("X-Last-Modified")
-		if !assert.NotEqual(colLastModified, commitLM, "ts should have changed. %s", commitLM) {
+		commitLM, _ := ConvertTimestamp(respCommit.Header().Get("X-Last-Modified"))
+		createLMint, _ := ConvertTimestamp(createLM)
+		if !assert.True(commitLM > createLMint, "commit ts invalid") {
 			return
 		}
 
