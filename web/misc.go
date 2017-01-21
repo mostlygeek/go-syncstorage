@@ -149,7 +149,7 @@ func parseIntoBSO(jsonData json.RawMessage, bso *syncstorage.PutBSOInput) *parse
 	// check to make sure values are appropriate
 	if r, ok := bkeys["id"]; ok {
 		err := json.Unmarshal(r, &bId)
-		if err != nil {
+		if err != nil || (len(r) == 4 && string(r[:]) == "null") {
 			return &parseError{field: "id", msg: "Invalid format"}
 		} else {
 			bso.Id = bId

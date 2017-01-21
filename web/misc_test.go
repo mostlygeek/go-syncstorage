@@ -187,4 +187,36 @@ func TestParseIntoBSO(t *testing.T) {
 			assert.Equal(100*365*24*60*60, *bso.TTL)
 		}
 	}
+
+	{ // test malformed json explodes
+		tests := []string{
+			`{"id":[]}`,
+			`{"id":123}`,
+			`{"id":{"x":"boom"}}`,
+			`{"id":null}`,
+
+			`{"id":"x", "payload":[]}`,
+			`{"id":"x", "payload":123}`,
+			`{"id":"x", "payload":{"x":"boom"}}`,
+
+			`{"id":"x", "ttl":[]}`,
+			`{"id":"x", "ttl":nu}`,
+			`{"id":"x", "ttl":"null"}`,
+			`{"id":"x", "ttl":{"x":1}}`,
+
+			`{"id":"x", "sortindex":[]}`,
+			`{"id":"x", "sortindex":nu}`,
+			`{"id":"x", "sortindex":"null"}`,
+			`{"id":"x", "sortindex":{"x":1}}`,
+		}
+
+		for _, test := range tests {
+			var bso syncstorage.PutBSOInput
+			err := parseIntoBSO(json.RawMessage(test), &bso)
+			if !assert.NotNil(err, test) {
+
+				break
+			}
+		}
+	}
 }
