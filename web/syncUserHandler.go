@@ -581,7 +581,7 @@ func (s *SyncUserHandler) hCollectionGET(w http.ResponseWriter, r *http.Request)
 
 	if v := r.Form.Get("limit"); v != "" {
 		limit, err = strconv.Atoi(v)
-		if err != nil || !syncstorage.LimitOk(limit) {
+		if err != nil || limit < 0 {
 			errMessage := "Invalid limit value"
 			if err != nil {
 				err = errors.Wrap(err, errMessage)
@@ -643,7 +643,7 @@ func (s *SyncUserHandler) hCollectionGET(w http.ResponseWriter, r *http.Request)
 	m := syncstorage.ModifiedToString(cmodified)
 	w.Header().Set("X-Last-Modified", m)
 
-	w.Header().Set("X-Weave-Records", strconv.Itoa(results.Total))
+	w.Header().Set("X-Weave-Records", strconv.Itoa(len(results.BSOs)))
 	if results.More {
 		w.Header().Set("X-Weave-Next-Offset", strconv.Itoa(results.Offset))
 	}

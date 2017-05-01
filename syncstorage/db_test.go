@@ -347,7 +347,6 @@ func TestPrivateGetBSOsLimitOffset(t *testing.T) {
 
 	if assert.NotNil(results) {
 		assert.Equal(5, len(results.BSOs), "Expected 5 results")
-		assert.Equal(totalRecords, results.Total, "Expected %d bsos to be found", totalRecords)
 		assert.True(results.More)
 		assert.Equal(5, results.Offset, "Expected next offset to be 5")
 
@@ -360,7 +359,6 @@ func TestPrivateGetBSOsLimitOffset(t *testing.T) {
 	assert.NoError(err)
 	if assert.NotNil(results2) {
 		assert.Equal(5, len(results2.BSOs), "Expected 5 results")
-		assert.Equal(totalRecords, results.Total, "Expected %d bsos to be found", totalRecords)
 		assert.True(results2.More)
 		assert.Equal(10, results2.Offset, "Expected next offset to be 10")
 
@@ -373,7 +371,6 @@ func TestPrivateGetBSOsLimitOffset(t *testing.T) {
 	assert.NoError(err)
 	if assert.NotNil(results3) {
 		assert.Equal(2, len(results3.BSOs), "Expected 2 results")
-		assert.Equal(totalRecords, results.Total, "Expected %d bsos to be found", totalRecords)
 		assert.False(results3.More)
 
 		// make sure we get the right BSOs
@@ -408,7 +405,6 @@ func TestPrivateGetBSOsNewer(t *testing.T) {
 	results, err := db.getBSOs(tx, cId, nil, MaxTimestamp, modified-3, SORT_NEWEST, 10, 0)
 	assert.NoError(err)
 	if assert.NotNil(results) {
-		assert.Equal(3, results.Total)
 		assert.Equal(3, len(results.BSOs))
 		assert.Equal("b0", results.BSOs[0].Id)
 		assert.Equal("b1", results.BSOs[1].Id)
@@ -418,7 +414,6 @@ func TestPrivateGetBSOsNewer(t *testing.T) {
 	results, err = db.getBSOs(tx, cId, nil, MaxTimestamp, modified-2, SORT_NEWEST, 10, 0)
 	assert.NoError(err)
 	if assert.NotNil(results) {
-		assert.Equal(2, results.Total)
 		assert.Equal("b0", results.BSOs[0].Id)
 		assert.Equal("b1", results.BSOs[1].Id)
 	}
@@ -426,14 +421,12 @@ func TestPrivateGetBSOsNewer(t *testing.T) {
 	results, err = db.getBSOs(tx, cId, nil, MaxTimestamp, modified-1, SORT_NEWEST, 10, 0)
 	assert.NoError(err)
 	if assert.NotNil(results) {
-		assert.Equal(1, results.Total)
 		assert.Equal("b0", results.BSOs[0].Id)
 	}
 
 	results, err = db.getBSOs(tx, cId, nil, MaxTimestamp, modified, SORT_NEWEST, 10, 0)
 	assert.NoError(err)
 	if assert.NotNil(results) {
-		assert.Equal(0, results.Total)
 	}
 
 }
@@ -908,7 +901,6 @@ func TestGetBSOs(t *testing.T) {
 	results, err := db.GetBSOs(cId, []string{"b0", "b2", "b4"}, MaxTimestamp, 0, SORT_NEWEST, 10, 0)
 	assert.NoError(err)
 	if assert.NotNil(results) {
-		assert.Equal(3, results.Total)
 		assert.Equal("b0", results.BSOs[0].Id) // created last
 		assert.Equal("b2", results.BSOs[1].Id)
 		assert.Equal("b4", results.BSOs[2].Id) // created first
@@ -917,7 +909,6 @@ func TestGetBSOs(t *testing.T) {
 	results, err = db.GetBSOs(cId, nil, MaxTimestamp, 0, SORT_INDEX, 2, 0)
 	assert.NoError(err)
 	if assert.NotNil(results) {
-		assert.Equal(5, results.Total)
 		assert.Equal(2, len(results.BSOs))
 		assert.Equal(2, results.Offset)
 		assert.True(results.More)
