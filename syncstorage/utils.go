@@ -75,7 +75,7 @@ func TTLOk(ttl int) bool {
 }
 
 func LimitOk(limit int) bool {
-	return (limit > 0)
+	return (limit >= 0)
 }
 
 func OffsetOk(offset int) bool {

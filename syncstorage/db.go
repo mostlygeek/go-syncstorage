@@ -887,12 +887,15 @@ func (d *DB) getBSOs(
 		orderBy = "ORDER BY Modified ASC "
 	}
 
-	limitStmt := "LIMIT ?"
-	values = append(values, limit)
+	var limitStmt string
+	if limit > 0 {
+		limitStmt = "LIMIT ?"
+		values = append(values, limit)
 
-	if offset != 0 {
-		limitStmt += " OFFSET ?"
-		values = append(values, offset)
+		if offset != 0 {
+			limitStmt += " OFFSET ?"
+			values = append(values, offset)
+		}
 	}
 
 	countQuery := "SELECT COUNT(1) NumRows FROM BSO " + where + " " + orderBy

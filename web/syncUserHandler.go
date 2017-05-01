@@ -21,9 +21,6 @@ import (
 )
 
 type SyncUserHandlerConfig struct {
-	// Over rides
-	MaxBSOGetLimit int
-
 	// API Limits
 	MaxRequestBytes       int
 	MaxPOSTRecords        int
@@ -37,7 +34,6 @@ type SyncUserHandlerConfig struct {
 func NewDefaultSyncUserHandlerConfig() *SyncUserHandlerConfig {
 	return &SyncUserHandlerConfig{
 		// API Limits
-		MaxBSOGetLimit:        1000,
 		MaxRequestBytes:       2 * 1024 * 1024,
 		MaxPOSTRecords:        100,
 		MaxPOSTBytes:          2 * 1024 * 1024,
@@ -595,11 +591,8 @@ func (s *SyncUserHandler) hCollectionGET(w http.ResponseWriter, r *http.Request)
 			sendRequestProblem(w, r, http.StatusBadRequest, err)
 			return
 		}
-	}
-
-	// assign a default value for limit if nothing is supplied
-	if limit <= 0 || limit > s.config.MaxBSOGetLimit {
-		limit = s.config.MaxBSOGetLimit
+	} else {
+		limit = 0
 	}
 
 	if v := r.Form.Get("offset"); v != "" {
