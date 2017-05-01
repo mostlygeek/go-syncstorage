@@ -884,19 +884,6 @@ func TestSyncUserHandlerCollectionGET(t *testing.T) {
 		assert.Equal(`["b5"]`, resp3.Body.String())
 		assert.Equal("", resp3.Header().Get("X-Weave-Next-Offset"))
 	}
-
-	{ // test MaxBSOGetLimit will enforces max bsos in a GET request
-		oldLimit := handler.config.MaxBSOGetLimit
-		handler.config.MaxBSOGetLimit = 3 // make it really small
-
-		resp := request("GET", syncurl(uid, "storage/test?sort=oldest&limit=99"), nil, handler)
-		assert.Equal(http.StatusOK, resp.Code, resp.Body.String())
-		assert.Equal(`["b1","b2","b3"]`, resp.Body.String())
-		assert.Equal("3", resp.Header().Get("X-Weave-Next-Offset"))
-
-		// RESTORE IT so we don't mess up other tests
-		handler.config.MaxBSOGetLimit = oldLimit
-	}
 }
 
 func TestSyncUserHandlerBsoGET(t *testing.T) {
