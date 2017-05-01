@@ -325,7 +325,7 @@ func TestPrivateGetBSOsLimitOffset(t *testing.T) {
 	}
 
 	// make sure a limit of 0 returns all the records
-	allBSOs, err := db.getBSOs(tx, cId, nil, MaxTimestamp, 0, SORT_INDEX, 0, 0)
+	allBSOs, err := db.getBSOs(tx, cId, nil, MaxTimestamp, 0, SORT_INDEX, -1, 0)
 	if !assert.NoError(err) {
 		return
 	}
@@ -337,9 +337,9 @@ func TestPrivateGetBSOsLimitOffset(t *testing.T) {
 	offset := 0
 
 	// make sure invalid values don't work for limit and offset
-	_, err = db.getBSOs(tx, cId, nil, MaxTimestamp, newer, SORT_INDEX, -1, offset)
+	_, err = db.getBSOs(tx, cId, nil, MaxTimestamp, newer, SORT_INDEX, -2, offset)
 	assert.Equal(ErrInvalidLimit, err)
-	_, err = db.getBSOs(tx, cId, nil, MaxTimestamp, newer, SORT_INDEX, limit, -1)
+	_, err = db.getBSOs(tx, cId, nil, MaxTimestamp, newer, SORT_INDEX, limit, -2)
 	assert.Equal(ErrInvalidOffset, err)
 
 	results, err := db.getBSOs(tx, cId, nil, MaxTimestamp, newer, SORT_NEWEST, limit, offset)

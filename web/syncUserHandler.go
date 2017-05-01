@@ -592,7 +592,9 @@ func (s *SyncUserHandler) hCollectionGET(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	} else {
-		limit = 0
+		// in sqlite a negative value for LIMIT results in
+		// no upper bound, ref: http://sqlite.org/lang_select.html#limitoffset
+		limit = -1
 	}
 
 	if v := r.Form.Get("offset"); v != "" {
