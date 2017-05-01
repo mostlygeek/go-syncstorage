@@ -930,7 +930,6 @@ func (d *DB) getBSOs(
 		countQuery := "SELECT COUNT(1) NumRows FROM BSO " + where + " " + orderBy
 		if err := tx.QueryRow(countQuery, values...).Scan(&totalRows); err != nil {
 			return nil, err
-
 		}
 
 		if totalRows > limit+offset {
