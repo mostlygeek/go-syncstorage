@@ -890,7 +890,7 @@ func (d *DB) getBSOs(
 
 	// fetch an extra row to detect if there are more
 	// rows that match the query conditions
-	if limit > 0 {
+	if limit >= 0 {
 		values = append(values, limit+1)
 	} else {
 		values = append(values, limit)
@@ -929,7 +929,7 @@ func (d *DB) getBSOs(
 	var more bool
 	var nextOffset int
 	num := len(bsos)
-	if limit > 0 && num > limit {
+	if limit >= 0 && num > limit {
 		bsos = bsos[:num-1]
 		more = true
 		nextOffset = limit + offset
