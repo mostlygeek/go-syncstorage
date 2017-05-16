@@ -219,8 +219,8 @@ func NewDB(path string, conf *Config) (*DB, error) {
 
 // LastModified gets the database modified time
 func (d *DB) LastModified() (modified int, err error) {
-	d.Lock()
-	defer d.Unlock()
+	d.RLock()
+	defer d.RUnlock()
 
 	var m sql.NullInt64
 
@@ -237,8 +237,8 @@ func (d *DB) LastModified() (modified int, err error) {
 }
 
 func (d *DB) GetCollectionId(name string) (id int, err error) {
-	d.Lock()
-	defer d.Unlock()
+	d.RLock()
+	defer d.RUnlock()
 
 	// return common collection id without touching the DB
 	// ew? yes, but it'll compile nice and fast
@@ -282,8 +282,8 @@ func (d *DB) GetCollectionId(name string) (id int, err error) {
 }
 
 func (d *DB) GetCollectionModified(cId int) (modified int, err error) {
-	d.Lock()
-	defer d.Unlock()
+	d.RLock()
+	defer d.RUnlock()
 	err = d.db.QueryRow("SELECT modified FROM Collections where Id=?", cId).Scan(&modified)
 	if err == sql.ErrNoRows {
 		return 0, nil
@@ -370,8 +370,8 @@ func (d *DB) TouchCollection(cId, modified int) (err error) {
 
 // InfoCollections create a map of collection names to last modified times
 func (d *DB) InfoCollections() (map[string]int, error) {
-	d.Lock()
-	defer d.Unlock()
+	d.RLock()
+	defer d.RUnlock()
 
 	rows, err := d.db.Query("SELECT Name,Modified FROM Collections WHERE Modified != 0")
 	if err != nil {
@@ -394,8 +394,8 @@ func (d *DB) InfoCollections() (map[string]int, error) {
 }
 
 func (d *DB) InfoQuota() (used, quota int, err error) {
-	d.Lock()
-	defer d.Unlock()
+	d.RLock()
+	defer d.RUnlock()
 
 	var u sql.NullInt64
 
@@ -420,8 +420,8 @@ func (d *DB) InfoQuota() (used, quota int, err error) {
 }
 
 func (d *DB) InfoCollectionUsage() (map[string]int, error) {
-	d.Lock()
-	defer d.Unlock()
+	d.RLock()
+	defer d.RUnlock()
 
 	query := `SELECT c.Name,sum(b.PayloadSize) used
 			  FROM BSO b, Collections C
@@ -448,8 +448,8 @@ func (d *DB) InfoCollectionUsage() (map[string]int, error) {
 }
 
 func (d *DB) InfoCollectionCounts() (map[string]int, error) {
-	d.Lock()
-	defer d.Unlock()
+	d.RLock()
+	defer d.RUnlock()
 
 	query := `SELECT c.Name, count(b.Id) count
 			  FROM BSO b, Collections C
@@ -572,8 +572,8 @@ func (d *DB) GetBSOs(
 	limit int,
 	offset int) (r *GetResults, err error) {
 
-	d.Lock()
-	defer d.Unlock()
+	d.RLock()
+	defer d.RUnlock()
 
 	r, err = d.getBSOs(d.db, cId, ids, older, newer, sort, limit, offset)
 
@@ -581,8 +581,8 @@ func (d *DB) GetBSOs(
 }
 
 func (d *DB) GetBSOModified(cId int, bId string) (modified int, err error) {
-	d.Lock()
-	defer d.Unlock()
+	d.RLock()
+	defer d.RUnlock()
 	err = d.db.QueryRow(`SELECT modified
 						 FROM BSO
 						 WHERE CollectionId=? and Id=? and TTL > ?`, cId, bId, Now()).Scan(&modified)
@@ -668,8 +668,8 @@ func (d *DB) PurgeExpired() (removed int, err error) {
 }
 
 func (d *DB) Usage() (stats *DBPageStats, err error) {
-	d.Lock()
-	defer d.Unlock()
+	d.RLock()
+	defer d.RUnlock()
 
 	stats = &DBPageStats{}
 
@@ -718,8 +718,8 @@ func (d *DB) SetKey(key, value string) error {
 
 // GetKey returns a previous key in the database
 func (d *DB) GetKey(key string) (string, error) {
-	d.Lock()
-	defer d.Unlock()
+	d.RLock()
+	defer d.RUnlock()
 	return getKey(d.db, key)
 }
 
